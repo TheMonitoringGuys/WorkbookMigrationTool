@@ -1,0 +1,16 @@
+# Output from runs - contains customer workspace names and resource IDs
+output/
+
+# Local config - contains real subscription IDs
+config.yaml
+config.yml
+config.json
+!samples/config.yaml
+
+# PowerShell / editor noise
+*.psd1.bak
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

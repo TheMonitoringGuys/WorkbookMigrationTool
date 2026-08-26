@@ -1,0 +1,54 @@
+#!/bin/sh
+#
+# pre-push hook - runs the Pester suite before allowing a push.
+#
+# This is the project's real test gate. The GitHub Actions workflow in
+# .github/workflows/tests.yml cannot execute in this repository, so nothing on the
+# server side is checking these tests.
+#
+# Installed by tools/Install-GitHooks.ps1, which points core.hooksPath here.
+#
+# To bypass deliberately:
+#
+#     git push --no-verify
+#
+
+ZERO="0000000000000000000000000000000000000000"
+refs_seen=0
+refs_deleting=0
+
+# git feeds one line per ref being pushed:  <local ref> <local sha> <remote ref> <remote sha>
+# A deletion has an all-zero local sha and needs no test run.
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    refs_seen=$((refs_seen + 1))
+    case "$local_sha" in
+        "$ZERO"|"") refs_deleting=$((refs_deleting + 1)) ;;
+    esac
+done
+
+# Only skip when we positively identified every ref as a deletion. If stdin was
+# empty or unparseable we fall through and run the tests, because failing safe
+# here means running tests we did not need - not skipping tests we did.
+if [ "$refs_seen" -gt 0 ] && [ "$refs_seen" -eq "$refs_deleting" ]; then
+    echo "pre-push: branch deletion only, skipping tests."
+    exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+runner="$repo_root/tools/Invoke-PrePushTests.ps1"
+
+if [ ! -f "$runner" ]; then
+    echo "pre-push: cannot find $runner - skipping tests." >&2
+    echo "pre-push: if this branch predates the hook, that is expected." >&2
+    exit 0
+fi
+
+if command -v pwsh >/dev/null 2>&1; then
+    exec pwsh -NoProfile -File "$runner"
+elif command -v powershell >/dev/null 2>&1; then
+    exec powershell -NoProfile -File "$runner"
+else
+    echo "pre-push: neither pwsh nor powershell found on PATH - cannot run tests." >&2
+    echo "pre-push: install PowerShell 7, or push with --no-verify to bypass." >&2
+    exit 1
+fi

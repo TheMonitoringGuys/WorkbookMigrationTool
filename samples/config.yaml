@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sample configuration for the Sentinel Workbook Scope Assistant
+# Copy this file, fill in your values, and pass with: -ConfigFile ./config.yaml
+#
+# Reading YAML needs the powershell-yaml module. It is installed for you
+# (CurrentUser scope) unless you pass -NoAutoInstall. The same settings work as
+# JSON with the same key names and need no extra module at all.
+#
+# Already have a config for the Sentinel Migration Assistant? Point this tool at
+# it directly. Its 'target' section is read as this tool's 'destination', so the
+# workspace IDs never have to be retyped.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The workspace migrated AWAY from - the one holding the older data that has
+# become invisible since the migration.
+source:
+  subscriptionId: "00000000-0000-0000-0000-000000000000"
+  resourceGroupName: "rg-sentinel-old"
+  workspaceName: "law-sentinel-old"
+
+# The workspace migrated TO, where the workbooks live now. This one stays the
+# workbook's primary context - it is listed first in every scope.
+destination:
+  subscriptionId: "00000000-0000-0000-0000-000000000000"
+  resourceGroupName: "rg-sentinel-new"
+  workspaceName: "law-sentinel-new"
+
+options:
+  # true = report only, no changes. Overridden by -Execute on the command line.
+  dryRun: true
+
+  # Azure cloud environment: Commercial | Gov
+  cloud: "Commercial"
+
+  # Restore destination-only scope. Use this when the source workspace is being
+  # decommissioned - once it is gone, a workbook still pointing at it errors.
+  revert: false
+
+  # After scoping, probe both workspaces: run one real cross-workspace query and
+  # compare which tables hold data in each.
+  #
+  # Off by default because it needs Log Analytics data-plane read access, which
+  # is a separate grant from the ARM permissions the re-scoping itself needs.
+  # Worth turning on for the first run against any new pair of workspaces: it is
+  # what catches "the workbook updated fine but renders empty".
+  validateQueries: false
+
+  # Lookback window for the validateQueries table inventory.
+  lookbackDays: 7
+
+  # Act on every Sentinel workbook in the destination resource group, not only
+  # those the migration created.
+  #
+  # Off by default on purpose. The default targets workbooks tagged
+  # MigratedFromWorkbookId, which the migration tool wrote and this tool can
+  # therefore reason about. Turning this on includes workbooks installed by
+  # Content Hub solutions, and a later solution update will silently overwrite
+  # the scoping applied to those.
+  includeAllWorkbooks: false
+
+  # Wildcard match on workbook display name, e.g. "Azure*". Empty means all.
+  workbookFilter: ""
+
+  # ARM API pacing.
+  # The run is sequential on purpose: ARM throttles per-subscription, so parallel
+  # writes finish no faster and produce partial states that are harder to resume
+  # from. Use throttleMs to slow down, not to speed up.
+  retryCount: 3
+  throttleMs: 100

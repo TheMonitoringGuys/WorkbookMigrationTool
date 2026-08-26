@@ -1,0 +1,57 @@
+name: Tests
+
+# NOTE: as of adding this file, GitHub Actions does not execute in this repository.
+# It is a private repo owned by an Enterprise Managed User account, where Actions is
+# disabled by enterprise policy - the Actions API reports zero registered workflows and
+# zero runs, and the PR that added the model workflow received no check runs at all.
+#
+# The workflow is kept because it is valid and will start working unchanged if the repo
+# moves to an org with Actions enabled, or the policy changes.
+#
+# Until then the real gate is local. Install it once per clone:
+#
+#   ./tools/Install-GitHooks.ps1
+#
+# That enables a pre-push hook running this same suite, refusing the push on failure.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pester:
+    name: Pester
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          $existing = Get-Module -ListAvailable -Name Pester |
+              Where-Object { $_.Version -ge [version]'5.0.0' }
+          if (-not $existing) {
+              Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          (Get-Module -ListAvailable -Name Pester | Sort-Object Version -Descending | Select-Object -First 1).Version
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'testResults.xml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-windows-latest
+          path: testResults.xml
+          if-no-files-found: warn
