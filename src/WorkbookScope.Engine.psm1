@@ -727,15 +727,6 @@ function Get-WorkbookQueryTable {
         'toscalar', 'view', 'restrict', 'alias', 'pattern'
     )
 
-    function Add-Candidate {
-        param([string]$Name)
-        if (-not $Name) { return }
-        if ($Name.ToLowerInvariant() -in $notTables) { return }
-        # Workbook parameter expansion, a function call, or a bare number.
-        if ($Name -match '^\d') { return }
-        [void]$tables.Add($Name)
-    }
-
     foreach ($entry in @(Get-WorkbookNode -Root $Root)) {
         $node = $entry.Node
         if (-not (Test-EligibleQueryNode -Node $node)) { continue }
@@ -744,16 +735,47 @@ function Get-WorkbookQueryTable {
         # Strip line comments so a commented-out table is not reported.
         $query = ($query -split '\r?\n' | ForEach-Object { $_ -replace '//.*$', '' }) -join "`n"
 
-        foreach ($statement in ($query -split ';')) {
+        # Names bound by `let` are query-local, not tables. They are the largest
+        # source of false positives by far: a workbook that defines `let cats =
+        # datatable(...)` and then pipes from `cats` would otherwise be reported
+        # as depending on a table named 'cats' that exists in neither workspace.
+        $letNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($m in [regex]::Matches($query, '(?im)^\s*let\s+([A-Za-z_][A-Za-z0-9_]*)\s*=')) {
+            [void]$letNames.Add($m.Groups[1].Value)
+        }
+
+        # Remove string literals and parenthesised groups before splitting.
+        # A multi-line case() or iff() otherwise leaves bare words such as
+        # 'high', 'low' and 'string' sitting alone on a line, which then read as
+        # statement-initial table references. Removing the interiors is cheaper
+        # and more reliable than trying to recognise each construct.
+        $scrubbed = $query -replace '"(?:[^"\\]|\\.)*"', '""' -replace "'(?:[^'\\]|\\.)*'", "''"
+        $previous = $null
+        while ($scrubbed -ne $previous) {
+            $previous = $scrubbed
+            $scrubbed = $scrubbed -replace '\([^()]*\)', '()'
+        }
+
+        $addCandidate = {
+            param([string]$Name)
+            if (-not $Name) { return }
+            if ($Name.ToLowerInvariant() -in $notTables) { return }
+            if ($letNames.Contains($Name)) { return }
+            if ($Name -match '^\d') { return }
+            [void]$tables.Add($Name)
+        }
+
+        foreach ($statement in ($scrubbed -split ';')) {
             $segments = $statement -split '\|'
             for ($i = 0; $i -lt $segments.Count; $i++) {
                 $seg = $segments[$i].Trim()
                 if (-not $seg) { continue }
 
-                if ($i -eq 0) {
-                    # Head of the statement: a bare table reference.
-                    if ($seg -match '^([A-Za-z_][A-Za-z0-9_]*)\s*(\||$|\r|\n)') { Add-Candidate $Matches[1] }
-                    elseif ($seg -match '^([A-Za-z_][A-Za-z0-9_]*)\b') { Add-Candidate $Matches[1] }
+                # Only the head of a statement names a bare table, and only when
+                # the identifier stands alone - 'T' or 'T | where'. Requiring
+                # that keeps expressions such as 'Category = tostring(x)' out.
+                if ($i -eq 0 -and $seg -match '^([A-Za-z_][A-Za-z0-9_]*)\s*$') {
+                    & $addCandidate $Matches[1]
                 }
 
                 # union and join name their tables as operands. Options such as
@@ -764,7 +786,7 @@ function Get-WorkbookQueryTable {
                     foreach ($m in [regex]::Matches($operands, '(?<![\w=])([A-Za-z_][A-Za-z0-9_]*)\s*(?![\w\s]*=)')) {
                         $candidate = $m.Groups[1].Value
                         if ($candidate.ToLowerInvariant() -in @('kind', 'withsource', 'isfuzzy', 'inner', 'outer', 'leftouter', 'rightouter', 'fullouter', 'leftanti', 'rightanti', 'leftsemi', 'rightsemi', 'on', 'hint', 'true', 'false')) { continue }
-                        Add-Candidate $candidate
+                        & $addCandidate $candidate
                     }
                 }
             }

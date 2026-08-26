@@ -227,12 +227,22 @@ function Invoke-ScopeValidation {
 
             $missingDst = @($needed | Where-Object { -not $dstSet.Contains($_) })
             $missingSrc = @($needed | Where-Object { -not $srcSet.Contains($_) })
-            if ($missingDst.Count -eq 0 -and $missingSrc.Count -eq 0) { continue }
+
+            # Report only asymmetry - a name present in one workspace and absent
+            # from the other. That is the whole signal this tool exists to
+            # surface, and restricting to it also removes the table extractor's
+            # false positives at a stroke: a misread column name is absent from
+            # both workspaces, so it can never be asymmetric. A name genuinely
+            # missing from both is a pre-existing gap in the workbook, not
+            # something dual scoping caused or can fix.
+            $onlyMissingDst = @($missingDst | Where-Object { $srcSet.Contains($_) })
+            $onlyMissingSrc = @($missingSrc | Where-Object { $dstSet.Contains($_) })
+            if ($onlyMissingDst.Count -eq 0 -and $onlyMissingSrc.Count -eq 0) { continue }
 
             $findings.Add([PSCustomObject]@{
                     DisplayName          = $name
-                    MissingInDestination = $missingDst
-                    MissingInSource      = $missingSrc
+                    MissingInDestination = $onlyMissingDst
+                    MissingInSource      = $onlyMissingSrc
                 })
         }
         $validation.WorkbookFindings = @($findings.ToArray())
