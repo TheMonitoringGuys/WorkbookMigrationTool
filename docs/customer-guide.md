@@ -236,12 +236,38 @@ output/scope-<source-ws>-with-<destination-ws>-<yyyyMMdd-HHmmss>/
 
 | Artifact | Description |
 |---|---|
-| `Scope-Summary.html` | Self-contained dashboard with KPI cards, next steps, preflight warnings, validation findings, and workbook detail tables unless `-NoDetailTables` is used. |
-| `scope-report.md` | Markdown report with the run header, workspace IDs, KPI summary, next steps, workbook results, ineligible query counts, preflight, validation, and collected errors. |
+| `Scope-Summary.html` | Self-contained dashboard with KPI cards, the scope mode, a decommission readiness statement, next steps, preflight warnings, validation findings, and workbook detail tables unless `-NoDetailTables` is used. |
+| `scope-report.md` | Markdown report with the run header, scope mode, workspace IDs, KPI summary, decommission readiness, next steps, workbook results, ineligible query counts, preflight, validation, and collected errors. |
 | `Scope-Results.xlsx` | Spreadsheet with Summary, Workbooks, Errors, and Validation sheets when validation ran. |
 | `csv/` | CSV fallback folder, one file per sheet, when `ImportExcel` is unavailable or disabled. |
 | `raw/RunResult.json` | Full structured run result for programmatic inspection. |
 | `snapshots/` | Exact pre-edit `serializedData` for each processed workbook. This is the authoritative rollback source. |
+
+### Reading the KPI summary
+
+Two measures look similar and mean different things. Both are rendered only when
+their count is greater than zero, so a run never shows one that does not apply.
+
+| Measure | Meaning |
+|---|---|
+| Parameters patched | A workspace picker the tool actually rewrote to name both workspaces. Literal mode only. |
+| Scoped via existing picker | A query that kept its own picker untouched and had the self-healing scope reference appended beside it. Self-healing mode only. |
+
+The distinction matters because self-healing deliberately leaves the customer's
+picker alone. An earlier version counted both as "parameters patched", so a run
+reported having patched 237 parameters while every picker was byte-identical.
+
+### Decommission readiness
+
+The report and the HTML summary both state, in one sentence derived from the run,
+whether the workbooks will keep working once the source workspace is deleted:
+
+- Self-healing, workbooks scoped, nothing failed - they will keep working, and no
+  revert is required first.
+- Literal - they will stop rendering, and must be reverted before the source
+  workspace is removed. The revert command is given.
+- Anything failed - readiness is unknown for those workbooks, and they are named.
+- A revert run - the workbooks are back to destination-only and the source can go.
 
 ## Exit codes
 
@@ -250,3 +276,4 @@ output/scope-<source-ws>-with-<destination-ws>-<yyyyMMdd-HHmmss>/
 | `0` | Completed with no failures |
 | `1` | Completed, but one or more items failed — check the report |
 | `2` | Could not start: bad configuration, unreachable workspace, or missing permission |
+

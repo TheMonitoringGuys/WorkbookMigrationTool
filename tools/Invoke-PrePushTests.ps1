@@ -83,6 +83,12 @@ if ($result.FailedCount -gt 0) {
     exit 1
 }
 
-Write-Host ("pre-push: {0}/{0} tests passed in {1:N0}s." -f $result.PassedCount, $stopwatch.Elapsed.TotalSeconds) -ForegroundColor Green
+Write-Host ("pre-push: {0}/{1} tests passed in {2:N0}s." -f $result.PassedCount, $result.TotalCount, $stopwatch.Elapsed.TotalSeconds) -ForegroundColor Green
+if ($result.SkippedCount -gt 0) {
+    # Worth surfacing: without it, a run where tests were skipped still reads as a
+    # clean pass, and the format string previously used PassedCount for both halves
+    # so the totals always agreed no matter how many tests never ran.
+    Write-Host ("pre-push: {0} test(s) skipped." -f $result.SkippedCount) -ForegroundColor Yellow
+}
 Write-Host ''
 exit 0
