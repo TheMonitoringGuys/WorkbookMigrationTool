@@ -394,13 +394,25 @@ Describe 'Self-healing scope' {
         }
     }
 
-    It 'is the default mode' {
-        # Chosen deliberately: the literal default left workbooks that broke the
-        # moment the source workspace was deleted.
+    It 'is not the default mode' {
+        # It was the default until first live contact. Resource Graph runs in the
+        # viewer's context scoped to the source subscription, and a viewer without
+        # read at that scope gets HTTP 502 "check the authorization header" -
+        # which, because the parameter is global, breaks the whole workbook rather
+        # than one tile. Literal has no such dependency, so it is the safe default
+        # and self-healing is opt-in.
         $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
         $root = ConvertFrom-SerializedWorkbook -Json $json
         $null = Set-WorkbookDualScope -Root $root `
             -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId
+        [string](Get-DualScopeManifest -Root $root)['scopeMode'] | Should -Be 'Literal'
+    }
+
+    It 'still self-heals when explicitly requested' {
+        $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId -ScopeMode SelfHealing
         [string](Get-DualScopeManifest -Root $root)['scopeMode'] | Should -Be 'SelfHealing'
     }
 

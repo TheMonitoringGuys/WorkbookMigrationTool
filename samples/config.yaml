@@ -34,21 +34,24 @@ options:
 
   # How the source workspace is referenced.
   #
-  #   SelfHealing (default)
-  #     Each query is scoped to the destination plus a hidden parameter that
-  #     resolves to the source workspace only while it exists. Resource Graph
-  #     stops returning a deleted workspace, so the reference simply drops out and
-  #     the workbook carries on showing destination data.
+  #   Literal (default)
+  #     Writes both workspace resource IDs directly into each query's scope.
+  #     Proven, and it depends on nothing but the two workspaces. The cost is that
+  #     the workbooks stop rendering the moment the source workspace is deleted,
+  #     so run a revert before decommissioning it.
   #
-  #     This is what lets you turn the old Sentinel off without breaking anything,
-  #     and without having to remember to revert first.
+  #   SelfHealing
+  #     References the source through a hidden Azure Resource Graph parameter that
+  #     resolves to nothing once the workspace is gone, so no revert is required
+  #     before turning the old Sentinel off.
   #
-  #   Literal
-  #     Writes both workspace resource IDs directly. Easier to read in the raw
-  #     JSON, but the workbooks stop rendering the moment the source workspace is
-  #     deleted - they must be reverted before it is decommissioned. Use this only
-  #     if self-healing misbehaves in your tenant.
-  scopeMode: "SelfHealing"
+  #     Opt-in, not the default. Resource Graph runs in the VIEWER's security
+  #     context, scoped to the source subscription. A viewer without read access at
+  #     that subscription scope gets HTTP 502 - "check the authorization header" -
+  #     and because the parameter is global it breaks the whole workbook, not one
+  #     tile. Log Analytics Reader granted at workspace scope is NOT enough.
+  #     Confirm subscription-level read for every viewer before enabling this.
+  scopeMode: "Literal"
 
   # Restore destination-only scope. In SelfHealing mode this is optional tidy-up:
   # it removes the now-dead parameter. In Literal mode it is mandatory before the
@@ -88,3 +91,4 @@ options:
   # from. Use throttleMs to slow down, not to speed up.
   retryCount: 3
   throttleMs: 100
+

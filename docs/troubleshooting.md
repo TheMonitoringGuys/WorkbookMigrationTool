@@ -2,6 +2,55 @@
 
 ## Common issues
 
+### HTTP 502 "check the authorization header" when opening a workbook
+
+**Cause:** The workbook is running an Azure Resource Graph query that the viewer is
+not allowed to make. Resource Graph runs in the *viewer's* security context, and the
+scope parameter this tool injects in `SelfHealing` mode is scoped to the source
+**subscription**. A viewer without read access at subscription scope gets a 502 whose
+message points at the authorization header, which reads like an Azure sign-in problem
+and is not one.
+
+Log Analytics Reader granted at *workspace* scope is not sufficient. Resource Graph
+needs read at the subscription that owns the workspace.
+
+Because the injected parameter is marked global, it is evaluated on every workbook
+load, so this takes the whole workbook down rather than a single tile.
+
+This only affects workbooks scoped with `-ScopeMode SelfHealing`. Literal mode issues
+no Resource Graph query at all, which is why the Sentinel Migration Assistant never
+produced this error.
+
+**Fix:** Re-scope the affected workbooks in literal mode, which is the default:
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute
+```
+
+The revert removes the injected parameter; the second run re-scopes using literal
+resource IDs. Remember that literal scope must be reverted before the source
+workspace is decommissioned.
+
+To keep self-healing, grant every viewer **Reader on the source subscription** (not
+just the workspace) and confirm with `-ValidateQueries`, which resolves the parameter
+query as the running identity and reports when it comes back empty or denied.
+
+### Signing in with device code authentication
+
+Some tenants require `Connect-AzAccount -UseDeviceAuth`. That works with this tool,
+but two things are worth knowing.
+
+A device-code session is often issued to an operator whose access was granted at
+workspace or resource-group scope rather than subscription scope. That is exactly the
+condition that breaks `SelfHealing` above, so prefer the default literal mode in such
+environments unless subscription-level read has been confirmed.
+
+`-ValidateQueries` additionally needs a token for the Log Analytics data plane, a
+different audience from ARM. Restricted tenants sometimes refuse to issue it. The run
+degrades rather than failing: the validation section reports the error and the
+workbooks are still scoped correctly.
+
 ### Workbook renders empty after scoping
 
 **Cause:** The viewer does not have Log Analytics data-plane read access on the source

@@ -177,12 +177,13 @@ Describe 'Validating configuration' {
 
 Describe 'Scope mode' {
 
-    It 'defaults to SelfHealing' {
-        # The default matters: Literal leaves workbooks that stop rendering the
-        # moment the source workspace is deleted, which is the failure this mode
-        # exists to remove.
+    It 'defaults to Literal' {
+        # SelfHealing was the default until a customer hit HTTP 502 on every
+        # workbook: its Resource Graph parameter runs in the viewer's context and
+        # needs subscription-scope read, which Log Analytics Reader at workspace
+        # scope does not grant. Literal depends on nothing beyond the workspaces.
         $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
-        $cfg.Options.ScopeMode | Should -Be 'SelfHealing'
+        $cfg.Options.ScopeMode | Should -Be 'Literal'
     }
 
     It 'reads scopeMode from the config file' {
@@ -190,16 +191,16 @@ Describe 'Scope mode' {
 {
   "source":      { "subscriptionId": "sub-a", "resourceGroupName": "rg-a", "workspaceName": "ws-a" },
   "destination": { "subscriptionId": "sub-b", "resourceGroupName": "rg-b", "workspaceName": "ws-b" },
-  "options":     { "scopeMode": "Literal" }
+  "options":     { "scopeMode": "SelfHealing" }
 }
 '@
-        (Read-ScopeConfig -Path $path).Options.ScopeMode | Should -Be 'Literal'
+        (Read-ScopeConfig -Path $path).Options.ScopeMode | Should -Be 'SelfHealing'
     }
 
     It 'accepts a command-line override' {
         $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
-        $merged = Merge-ParameterOverrides -Config $cfg -Overrides @{ ScopeMode = 'Literal' }
-        $merged.Options.ScopeMode | Should -Be 'Literal'
+        $merged = Merge-ParameterOverrides -Config $cfg -Overrides @{ ScopeMode = 'SelfHealing' }
+        $merged.Options.ScopeMode | Should -Be 'SelfHealing'
     }
 
     It 'accepts both valid modes' {

@@ -8,9 +8,10 @@ in the source workspace becomes invisible.
 This tool updates the migrated workbooks so their Log Analytics queries read from
 both workspaces. The workbook still lives in the destination Sentinel blade.
 
-By default the source is referenced in a way that **survives the old workspace being
-deleted**: when you eventually turn the old Sentinel off, the workbooks keep
-rendering against the destination alone. Nothing has to be reverted first. See
+By default the source is referenced by its resource ID, so the workbooks must be
+reverted before the old workspace is decommissioned. An opt-in `-ScopeMode
+SelfHealing` removes that ordering requirement, at the cost of requiring every
+viewer to have Reader on the source subscription. See
 [How scoping works](#how-scoping-works).
 
 ## Requirements
@@ -88,19 +89,23 @@ never modified, so the workbook stays attached to the destination Sentinel works
 
 | Mode | How the source is referenced | When the source workspace is deleted |
 |---|---|---|
-| `SelfHealing` (default) | Destination as a literal, plus `{WBScopeSource}` — a hidden parameter backed by Azure Resource Graph | Resource Graph stops returning the workspace, the parameter resolves to empty, the reference drops out, and the query runs against the destination alone. **The workbook keeps working.** |
-| `Literal` | Both workspace resource IDs written directly | Azure returns *resource not found* and the tile fails. **The workbooks must be reverted before the workspace is deleted.** |
+| `Literal` (default) | Both workspace resource IDs written directly | Azure returns *resource not found* and the tile fails. **The workbooks must be reverted before the workspace is deleted.** |
+| `SelfHealing` | Destination as a literal, plus `{WBScopeSource}` — a hidden parameter backed by Azure Resource Graph | Resource Graph stops returning the workspace, the parameter resolves to empty, the reference drops out, and the query runs against the destination alone. **The workbook keeps working.** |
 
-Self-healing works because the injected parameter is a Resource Graph resource
-picker filtered to exactly one workspace. Resource Graph is an inventory of live
-resources, so a deleted workspace simply stops appearing in the result. The
-parameter is marked global so every query can resolve it, hidden so viewers never
-see it, and deliberately **not** required — a required picker with no results would
-block every query that depends on it, turning the graceful degradation into a hard
-stop.
+Self-healing removes the need to revert before decommissioning, but it is **opt-in**,
+not the default. Its Resource Graph query runs in the *viewer's* security context,
+scoped to the source subscription. A viewer without read access at that scope gets
+HTTP 502 complaining about the authorization header — and because the parameter is
+global, that takes the whole workbook down rather than one tile. Log Analytics Reader
+granted at workspace scope is **not** sufficient for this.
 
-`Literal` is kept as an escape hatch. Use it if self-healing misbehaves in your
-tenant.
+It shipped as the default in 1.1.0 and was reverted in 1.2.0 after a customer hit
+exactly that. The mode's assumption — that the parameter resolves empty when it cannot
+see the workspace — holds when the workspace has been *deleted*, but not when the
+caller lacks *permission*: Resource Graph returns an error, not an empty set.
+
+Before choosing it, grant every viewer Reader on the source subscription and confirm
+with `-ValidateQueries`, which resolves the parameter query as the running identity.
 
 ### What each query shape gets
 

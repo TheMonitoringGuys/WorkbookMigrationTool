@@ -143,7 +143,7 @@ function ConvertTo-NormalizedConfig {
         Options     = [PSCustomObject]@{
             DryRun              = $true
             Cloud               = 'Commercial'
-            ScopeMode           = 'SelfHealing'
+            ScopeMode           = 'Literal'
             Revert              = $false
             ValidateQueries     = $false
             IncludeAllWorkbooks = $false

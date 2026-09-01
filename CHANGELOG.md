@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.0] - 2026-09-01
+
+### Changed
+
+- **The default scope mode is now `Literal` again.** `SelfHealing` shipped as the
+  default in 1.1.0 on the strength of documented Azure behaviour that had not been
+  exercised against a live tenant. First contact disproved part of it.
+
+  The mode injects an Azure Resource Graph parameter, and Resource Graph runs in the
+  *viewer's* security context scoped to the source subscription. A viewer without
+  read access at subscription scope receives HTTP 502 with a message about the
+  authorization header. Because the parameter is marked global it is evaluated on
+  every workbook load, so the whole workbook fails rather than one tile.
+
+  The design assumed the parameter would resolve to an empty result when it could not
+  see the workspace, and degrade gracefully. That holds when the workspace has been
+  *deleted*. It does not hold when the caller lacks *permission*: Resource Graph
+  returns an error, not an empty set.
+
+  Literal mode issues no Resource Graph query, which is why the Sentinel Migration
+  Assistant never produced this error.
+
+- `SelfHealing` remains available and unchanged via `-ScopeMode SelfHealing`. It still
+  removes the need to revert before decommissioning. Confirm every viewer has Reader
+  on the source subscription first, and verify with `-ValidateQueries`.
+
+### Documented
+
+- Troubleshooting entry for HTTP 502 "check the authorization header", with the
+  re-scope commands to recover affected workbooks.
+- Guidance for tenants that require `Connect-AzAccount -UseDeviceAuth`, where access
+  is commonly scoped below the subscription and literal mode is the safer choice.
+- Corrected the permission claim throughout: Log Analytics Reader at workspace scope
+  is enough to *read the data*, but not to satisfy a subscription-scoped Resource
+  Graph query.
+
 ## [1.1.0] - 2026-08-31
 
 ### Added

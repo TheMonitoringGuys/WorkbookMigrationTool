@@ -484,7 +484,7 @@ function New-DualScopeManifest {
         [Parameter(Mandatory)][string]$SourceWorkspaceId,
         [Parameter(Mandatory)][string]$DestinationWorkspaceId,
         [Parameter(Mandatory)][object[]]$Changes,
-        [string]$ScopeMode = 'SelfHealing',
+        [string]$ScopeMode = 'Literal',
         [string]$ScopeParameterName
     )
 
@@ -517,12 +517,20 @@ function Set-WorkbookDualScope {
         already carrying a manifest for the same workspace pair and scope mode is
         reported as AlreadyScoped and left untouched.
     .PARAMETER ScopeMode
-        SelfHealing (default) references the source through a hidden parameter
-        that resolves to nothing once the workspace is deleted, so the workbook
-        keeps rendering and no revert is needed before decommissioning.
+        Literal (default) writes both resource IDs directly. It depends on
+        nothing beyond the two workspaces, but the workbook stops rendering once
+        the source is deleted, so it must be reverted before decommissioning.
 
-        Literal writes both resource IDs directly. Simpler to read, but the
-        workbook stops rendering the moment the source is deleted.
+        SelfHealing references the source through a hidden Azure Resource Graph
+        parameter that resolves to nothing once the workspace is gone, so no
+        revert is needed first.
+
+        SelfHealing is opt-in rather than the default because Resource Graph runs
+        in the viewer's security context, scoped to the source subscription. A
+        viewer without read access at that scope gets HTTP 502 complaining about
+        the authorization header, and since the parameter is global that takes
+        the whole workbook down rather than one tile. Log Analytics Reader at
+        workspace scope does not grant it.
     .PARAMETER SourceSubscriptionId
         In SelfHealing mode, the subscription Resource Graph must search to find
         the source workspace. In Literal mode, used to widen a resource picker
@@ -536,7 +544,7 @@ function Set-WorkbookDualScope {
         [Parameter(Mandatory)][string]$SourceWorkspaceId,
         [Parameter(Mandatory)][string]$DestinationWorkspaceId,
         [ValidateSet('SelfHealing', 'Literal')]
-        [string]$ScopeMode = 'SelfHealing',
+        [string]$ScopeMode = 'Literal',
         [string]$SourceSubscriptionId,
         [string]$DestinationSubscriptionId
     )

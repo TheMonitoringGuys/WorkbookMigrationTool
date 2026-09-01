@@ -113,7 +113,7 @@ use `-Force`; otherwise the run stops rather than guessing.
 `-ScopeMode` controls how the source workspace is referenced, and therefore what
 happens when that workspace is eventually deleted.
 
-### SelfHealing (default)
+### SelfHealing (opt-in)
 
 Each eligible query is scoped to the destination workspace as a literal, plus a
 reference to `{WBScopeSource}` — a parameter the tool injects into the workbook. That
@@ -134,29 +134,33 @@ The customer's own workspace picker is not modified in this mode; the reference 
 appended beside it. `fallbackResourceIds` is left untouched, because a literal there
 could not self-heal.
 
-### Literal
+### Literal (default)
 
 Both workspace resource IDs are written directly into each query's scope array.
-Easier to read in the raw JSON, and it does not depend on Resource Graph — but the
-workbooks stop rendering the moment the source workspace is deleted, and must be
-reverted first.
-
-Use this only if self-healing misbehaves in your tenant.
+Easier to read in the raw JSON, and it depends on nothing but the two workspaces —
+no Resource Graph, no subscription-scope permission. The cost is that the workbooks
+stop rendering the moment the source workspace is deleted, so they must be reverted
+before it is decommissioned.
 
 ### Choosing
 
-| | SelfHealing | Literal |
+| | Literal (default) | SelfHealing |
 |---|---|---|
-| Survives source deletion | Yes | No |
-| Revert required before decommissioning | No | Yes |
-| Depends on Resource Graph visibility | Yes | No |
-| Failure mode when a viewer lacks access to the source | Silently shows destination-only data | Visible error |
-| Verified against live Azure | Not yet | Not yet |
+| Survives source deletion | No | Yes |
+| Revert required before decommissioning | Yes | No |
+| Depends on Resource Graph | No | Yes |
+| Viewer permission needed | Log Analytics Reader on both workspaces | The same, **plus Reader on the source subscription** |
+| Failure mode when a viewer lacks that access | Tile shows a clear error | **HTTP 502 on the whole workbook** |
+| Exercised against a live tenant | Yes | Yes — and it surfaced the permission problem above |
 
-Neither mode has been exercised against a live Azure tenant; verification so far is
-offline against saved workbook JSON. Self-healing additionally depends on documented
-Azure behaviour that has not been confirmed end to end, which is why `Literal`
-remains available.
+Prefer `Literal` unless you have confirmed subscription-scope read for every person
+who will open these workbooks. Self-healing's advantage is real — it removes the
+requirement to revert before decommissioning — but it trades a narrow, obvious
+failure for a broad, confusing one when permissions are short.
+
+The self-healing transform itself is verified offline against 523 real queries: all
+of them keep a usable destination scope when the source workspace disappears. What
+live use corrected was the permission assumption, not the transform.
 
 ## CLI parameters
 

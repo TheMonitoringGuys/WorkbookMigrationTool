@@ -56,17 +56,24 @@
     Azure cloud environment: Commercial or Gov.
 
 .PARAMETER ScopeMode
-    How the source workspace is referenced.
+    How the source workspace is referenced. Defaults to Literal.
 
-    SelfHealing (default) points each query at the destination as a literal plus a
-    hidden parameter that resolves to the source workspace only while it exists.
-    When the source is deleted the parameter resolves to nothing, the reference
-    drops out, and the workbook carries on showing destination data. Nothing has
-    to be reverted before the old workspace is turned off.
+    Literal writes both workspace resource IDs directly into each query's scope.
+    Proven, and it depends on nothing but the workspaces themselves. The cost is
+    that the workbooks stop rendering the moment the source workspace is deleted,
+    so they must be reverted before it is decommissioned.
 
-    Literal writes both workspace resource IDs directly, which is simpler to read
-    but means the workbooks stop rendering the moment the source is deleted -
-    they must be reverted first. Use it if self-healing misbehaves in your tenant.
+    SelfHealing references the source through a hidden Azure Resource Graph
+    parameter that resolves to nothing once the workspace is gone, so no revert
+    is needed before decommissioning.
+
+    SelfHealing is opt-in, not the default, because Resource Graph is queried in
+    the VIEWER's security context and scoped to the source subscription. A viewer
+    who lacks read access at that subscription scope gets HTTP 502 with a message
+    about the authorization header, and because the parameter is global that
+    breaks the whole workbook rather than one tile. Log Analytics Reader granted
+    at workspace scope is NOT sufficient for this. Confirm every viewer has
+    subscription-level read on the source before choosing it.
 
 .PARAMETER Force
     Skip the confirmation prompt in -Execute mode. Required for unattended runs.
@@ -187,7 +194,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:ToolVersion = '1.1.0'
+$script:ToolVersion = '1.2.0'
 
 # ── Module loading ────────────────────────────────────────────────────────────
 # Import-Module -Force removes a module before re-importing it, and every module

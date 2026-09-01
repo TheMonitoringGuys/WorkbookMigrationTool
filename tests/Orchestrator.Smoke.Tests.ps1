@@ -281,16 +281,16 @@ Describe 'Revert' {
 
 Describe 'Scope mode' {
 
-    It 'defaults to self-healing and says so' {
+    It 'defaults to literal and says so' {
         $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true }
         $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
-        $r.Stdout | Should -Match 'Scope mode:\s+SelfHealing'
+        $r.Stdout | Should -Match 'Scope mode:\s+Literal'
     }
 
-    It 'honours -ScopeMode Literal as the escape hatch' {
-        $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true; ScopeMode = 'Literal' }
+    It 'honours -ScopeMode SelfHealing when asked for it' {
+        $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true; ScopeMode = 'SelfHealing' }
         $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
-        $r.Stdout | Should -Match 'Scope mode:\s+Literal'
+        $r.Stdout | Should -Match 'Scope mode:\s+SelfHealing'
     }
 
     It 'rejects an unknown scope mode at bind time' {
