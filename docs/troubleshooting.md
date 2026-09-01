@@ -142,6 +142,55 @@ different audience from ARM. Restricted tenants sometimes refuse to issue it. Th
 degrades rather than failing: the validation section reports the error and the
 workbooks are still scoped correctly.
 
+### Some workbooks show the old workspace's data and others do not
+
+Most often this is not a failure. By default the tool only updates workbooks the
+Sentinel Migration Assistant created, identified by a `MigratedFromWorkbookId` tag.
+A workbook built by hand in the portal, or installed from a Content Hub solution,
+does not carry that tag and is skipped - so it keeps showing destination data only,
+sitting next to workbooks that were updated.
+
+From version 1.2.5 a run names the workbooks it is skipping and why. Earlier
+versions only reported a count, along the lines of `Found 3 migrated workbook(s)
+(from 16 bound to the destination workspace)`, which is easy to read past.
+
+**Check which workbooks are actually scoped:**
+
+```powershell
+./tools/Test-WorkbookScope.ps1 `
+    -SubscriptionId <destination-sub> `
+    -ResourceGroupName <destination-rg> `
+    -WorkspaceName <destination-workspace> `
+    -SourceWorkspaceName <old-workspace>
+```
+
+It reads every workbook and resolves each query by the route it actually uses -
+its own literal scope, the resource picker it points at, or the workbook-level
+default - then reports `OK`, `PARTIAL` or `NOT SCOPED` per workbook. A workbook
+can be correct on one route and broken on another, which is what makes this look
+like "solution workbooks work and custom ones do not". It is read-only.
+
+**To include the untouched workbooks:**
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -IncludeAllWorkbooks -DryRun
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -IncludeAllWorkbooks -Execute
+```
+
+Updating a Content Hub solution can revert its own workbooks, so those may need
+scoping again afterwards.
+
+**If the audit reports every workbook scoped and the data still does not appear,**
+the workbooks are not the cause. Two things account for nearly all of it:
+
+- **The viewer lacks Log Analytics Reader on the old workspace.** A cross-workspace
+  query silently returns only the workspaces the caller can read. There is no
+  error - the rows are simply absent, which looks exactly like missing data.
+- **The time range predates the old workspace's last ingestion.** After a migration
+  the old workspace usually stops receiving data, so a workbook showing the last
+  24 hours has nothing to draw from it. Widen the range to cover before the
+  migration.
+
 ### Workbook renders empty after scoping
 
 **Cause:** The viewer does not have Log Analytics data-plane read access on the source

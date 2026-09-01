@@ -247,11 +247,13 @@ Run tools/Test-ScopeConnection.ps1 to identify which.
 
     $total = $workbooks.Count
 
+    $excludedByTag = @()
     if ($IncludeAllWorkbooks) {
         $filtered = @($workbooks)
     }
     else {
         $filtered = @($workbooks | Where-Object { Test-WorkbookIsMigrated -Workbook $_ })
+        $excludedByTag = @($workbooks | Where-Object { -not (Test-WorkbookIsMigrated -Workbook $_) })
     }
 
     if (-not [string]::IsNullOrWhiteSpace($WorkbookFilter)) {
@@ -263,6 +265,35 @@ Run tools/Test-ScopeConnection.ps1 to identify which.
     }
     else {
         Write-Host "  Found $($filtered.Count) migrated workbook(s) (from $total bound to the destination workspace)" -ForegroundColor Cyan
+    }
+
+    # Say plainly which workbooks are being left out, and why.
+    #
+    # The count above technically carries this - "3 migrated (from 16 bound)" - but
+    # it is easy to read past, and the consequence only shows up later as some
+    # workbooks displaying the old workspace's data and others not. Anything not
+    # created by the migration assistant is skipped here: workbooks built by hand,
+    # and anything installed from a Content Hub solution. Naming them costs a few
+    # lines and removes an entire class of confusion.
+    if ($excludedByTag.Count -gt 0) {
+        Write-Host ''
+        Write-Warning "$($excludedByTag.Count) workbook(s) bound to this workspace are NOT being updated, because they carry no MigratedFromWorkbookId tag and so were not created by the Sentinel Migration Assistant:"
+
+        $show = @($excludedByTag | Select-Object -First 10)
+        foreach ($w in $show) {
+            Write-Host "      - $(Get-WorkbookDisplayName -Workbook $w)" -ForegroundColor Yellow
+        }
+        if ($excludedByTag.Count -gt $show.Count) {
+            Write-Host "      ... and $($excludedByTag.Count - $show.Count) more" -ForegroundColor Yellow
+        }
+
+        Write-Host ''
+        Write-Host '    These will keep showing destination data only. To include them, re-run with:' -ForegroundColor Yellow
+        Write-Host '       -IncludeAllWorkbooks' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host '    Be aware that updating a Content Hub solution can revert its own workbooks,' -ForegroundColor Yellow
+        Write-Host '    so those may need scoping again afterwards.' -ForegroundColor Yellow
+        Write-Host ''
     }
 
     return @($filtered)

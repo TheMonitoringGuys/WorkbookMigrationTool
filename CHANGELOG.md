@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.5] - 2026-09-01
+
+### Added
+
+- `tools/Test-WorkbookScope.ps1`, which reports for every workbook in the destination
+  whether it is genuinely scoped to both workspaces, and when it is not, why.
+
+  "Scoped" is not one condition. A query reaches its data by one of three routes -
+  literal resource IDs on the query, a resource picker it points at, or the
+  workbook-level `fallbackResourceIds` - and each fails differently. A workbook can be
+  correct on one route and broken on another, which is what makes this present as
+  "solution workbooks work and custom ones do not". The audit resolves every query by
+  the route it actually uses and reports `OK`, `PARTIAL` or `NOT SCOPED` per workbook,
+  with the reason. It is read-only.
+
+### Changed
+
+- A run now names the workbooks it is skipping, instead of only counting them.
+
+  By default the tool updates only workbooks carrying a `MigratedFromWorkbookId` tag,
+  which is to say the ones the Sentinel Migration Assistant created. Workbooks built by
+  hand, and anything installed from a Content Hub solution, do not carry it and were
+  skipped silently. The only signal was a count - `Found 3 migrated workbook(s) (from 16
+  bound to the destination workspace)` - which is easy to read past, and whose
+  consequence only appears later as some workbooks showing the old workspace's data and
+  others not.
+
+  The skipped workbooks are now listed by name, with the reason and the
+  `-IncludeAllWorkbooks` switch that includes them, plus a note that a Content Hub
+  solution update can revert its own workbooks.
+
 ## [1.2.4] - 2026-09-01
 
 ### Fixed
