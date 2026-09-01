@@ -79,6 +79,16 @@ function Get-ScopeFailedWorkbookNames {
         })
 }
 
+function Get-ScopeResultSum {
+    param([object[]]$Results, [Parameter(Mandatory)][string]$Property)
+    $sum = 0
+    foreach ($r in @(ConvertTo-ItemList $Results)) {
+        $value = Get-ScopeProp $r $Property 0
+        if ($null -ne $value) { $sum += [int]$value }
+    }
+    return $sum
+}
+
 function Get-ScopeDecommissionReadiness {
     param([object]$RunResult)
     $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
@@ -130,19 +140,23 @@ function Get-ScopeKpis {
         param($Pattern)
         @($results | Where-Object { (Get-NormalizedAction $_.Action) -match $Pattern }).Count
     }
-    [ordered]@{
-        'Workbooks processed'    = $results.Count
-        'Scoped to both'         = & $countBy '^Scoped$'
-        'Reverted'               = & $countBy '^Reverted$'
-        'Already scoped'         = & $countBy '^AlreadyScoped$'
-        'Not scoped'             = & $countBy '^NotScoped$'
-        'Skipped'                = & $countBy '^Skipped$'
-        'Failed'                 = & $countBy '^Failed$'
-        'Eligible queries'       = ($results | Measure-Object -Property Eligible -Sum).Sum
-        'Ineligible queries'     = ($results | Measure-Object -Property Ineligible -Sum).Sum
-        'Parameters patched'     = ($results | Measure-Object -Property ParametersPatched -Sum).Sum
-        'Collected errors'       = $errors.Count
+    $parametersPatched = Get-ScopeResultSum -Results $results -Property 'ParametersPatched'
+    $scopedViaPicker = Get-ScopeResultSum -Results $results -Property 'ScopedViaPicker'
+    $kpis = [ordered]@{
+        'Workbooks processed' = @($results).Count
+        'Scoped to both'      = & $countBy '^Scoped$'
+        'Reverted'            = & $countBy '^Reverted$'
+        'Already scoped'      = & $countBy '^AlreadyScoped$'
+        'Not scoped'          = & $countBy '^NotScoped$'
+        'Skipped'             = & $countBy '^Skipped$'
+        'Failed'              = & $countBy '^Failed$'
+        'Eligible queries'    = Get-ScopeResultSum -Results $results -Property 'Eligible'
+        'Ineligible queries'  = Get-ScopeResultSum -Results $results -Property 'Ineligible'
     }
+    if ($parametersPatched -gt 0) { $kpis['Parameters patched'] = $parametersPatched }
+    if ($scopedViaPicker -gt 0) { $kpis['Scoped via existing picker'] = $scopedViaPicker }
+    $kpis['Collected errors'] = @($errors).Count
+    return $kpis
 }
 
 function Get-ScopeNextSteps {
@@ -305,10 +319,10 @@ function New-ScopeReportContent {
     [void]$sb.AppendLine('')
     $wbRows = [System.Collections.Generic.List[object[]]]::new()
     foreach ($r in $results) {
-        $wbRows.Add(@($r.DisplayName, (Format-ActionLabel $r.Action), $r.Eligible, $r.Added, $r.Replaced, $r.ParametersPatched, $r.Reason)) | Out-Null
+        $wbRows.Add(@($r.DisplayName, (Format-ActionLabel $r.Action), $r.Eligible, $r.Added, $r.Replaced, (Get-ScopeProp $r 'ParametersPatched' 0), (Get-ScopeProp $r 'ScopedViaPicker' 0), $r.Reason)) | Out-Null
     }
     if ($wbRows.Count -gt 0) {
-        [void]$sb.AppendLine((New-ScopeReportTable -Header @('Workbook', $actionHeader, 'Eligible', 'Added', 'Replaced', 'Params patched', 'Reason') -Row $wbRows))
+        [void]$sb.AppendLine((New-ScopeReportTable -Header @('Workbook', $actionHeader, 'Eligible', 'Added', 'Replaced', 'Parameters patched', 'Scoped via existing picker', 'Reason') -Row $wbRows))
     }
     else {
         [void]$sb.AppendLine('No workbook results were recorded.')

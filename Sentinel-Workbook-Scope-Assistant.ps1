@@ -392,7 +392,7 @@ try {
 
         $result = [PSCustomObject]@{
             WorkbookId = $wb.name; DisplayName = $displayName; Action = 'Failed'; Method = $null
-            Eligible = 0; Ineligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0
+            Eligible = 0; Ineligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0
             FallbackUpdated = 0; ParameterNames = @(); SnapshotPath = $null; Reason = $null
             Tables = @()
         }
@@ -444,6 +444,13 @@ try {
                 $result.Added = $applied.Stats.Added
                 $result.Replaced = $applied.Stats.Replaced
                 $result.ParametersPatched = $applied.Stats.ParametersPatched
+                $result.ScopedViaPicker = 0
+                if ($applied.Stats -is [System.Collections.IDictionary]) {
+                    if ($applied.Stats.Contains('ScopedViaPicker')) { $result.ScopedViaPicker = $applied.Stats['ScopedViaPicker'] }
+                }
+                elseif ($applied.Stats.PSObject.Properties['ScopedViaPicker']) {
+                    $result.ScopedViaPicker = $applied.Stats.ScopedViaPicker
+                }
                 $result.FallbackUpdated = $applied.Stats.Fallback
                 $newSerialized = ConvertTo-SerializedWorkbook -Root $root
                 $result.Tables = @(Get-WorkbookQueryTable -Root $root)

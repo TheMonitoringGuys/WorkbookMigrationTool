@@ -80,6 +80,16 @@ function New-ScopeBarChart {
     return "<div class='chart'><h3>$(ConvertTo-ScopeHtmlEncoded $Title)</h3>$($rows -join "`n")</div>"
 }
 
+function Get-ScopeResultSum {
+    param([object[]]$Results, [Parameter(Mandatory)][string]$Property)
+    $sum = 0
+    foreach ($r in @(ConvertTo-ItemList $Results)) {
+        $value = Get-ScopeProp $r $Property 0
+        if ($null -ne $value) { $sum += [int]$value }
+    }
+    return $sum
+}
+
 function Get-ScopeKpis {
     param([object]$RunResult)
     $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
@@ -88,20 +98,24 @@ function Get-ScopeKpis {
         param($Pattern)
         @($results | Where-Object { (Get-NormalizedAction $_.Action) -match $Pattern }).Count
     }
-    [ordered]@{
+    $parametersPatched = Get-ScopeResultSum -Results $results -Property 'ParametersPatched'
+    $scopedViaPicker = Get-ScopeResultSum -Results $results -Property 'ScopedViaPicker'
+    $kpis = [ordered]@{
         'Scope mode'          = Get-ScopeModeLabel -RunResult $RunResult
-        'Workbooks processed' = $results.Count
+        'Workbooks processed' = @($results).Count
         'Scoped to both'      = & $countBy '^Scoped$'
         'Reverted'            = & $countBy '^Reverted$'
         'Already scoped'      = & $countBy '^AlreadyScoped$'
         'Not scoped'          = & $countBy '^NotScoped$'
         'Skipped'             = & $countBy '^Skipped$'
         'Failed'              = & $countBy '^Failed$'
-        'Eligible queries'    = ($results | Measure-Object -Property Eligible -Sum).Sum
-        'Ineligible queries'  = ($results | Measure-Object -Property Ineligible -Sum).Sum
-        'Parameters patched'  = ($results | Measure-Object -Property ParametersPatched -Sum).Sum
-        'Errors'              = $errors.Count
+        'Eligible queries'    = Get-ScopeResultSum -Results $results -Property 'Eligible'
+        'Ineligible queries'  = Get-ScopeResultSum -Results $results -Property 'Ineligible'
     }
+    if ($parametersPatched -gt 0) { $kpis['Parameters patched'] = $parametersPatched }
+    if ($scopedViaPicker -gt 0) { $kpis['Scoped via existing picker'] = $scopedViaPicker }
+    $kpis['Errors'] = @($errors).Count
+    return $kpis
 }
 
 function Get-ScopeModeLabel {
@@ -326,7 +340,7 @@ function New-ScopeDetailTable {
             'Skipped' { ' class="row-warn"' }
             default { '' }
         }
-        $cells = foreach ($c in $columns) { "<td>$(ConvertTo-ScopeHtmlEncoded $r.$c)</td>" }
+        $cells = foreach ($c in $columns) { "<td>$(ConvertTo-ScopeHtmlEncoded $r.PSObject.Properties[$c].Value)</td>" }
         "<tr$cls>$($cells -join '')</tr>"
     }
     return @"
@@ -357,7 +371,8 @@ function ConvertTo-WorkbookRows {
             Ineligible        = $r.Ineligible
             Added             = $r.Added
             Replaced          = $r.Replaced
-            ParametersPatched = $r.ParametersPatched
+            'Parameters patched' = Get-ScopeProp $r 'ParametersPatched' 0
+            'Scoped via existing picker' = Get-ScopeProp $r 'ScopedViaPicker' 0
             FallbackUpdated   = $r.FallbackUpdated
             ParameterNames    = (@(ConvertTo-ItemList $r.ParameterNames) -join '; ')
             SnapshotPath      = $r.SnapshotPath

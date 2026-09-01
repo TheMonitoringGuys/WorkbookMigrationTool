@@ -239,6 +239,18 @@ Describe 'Applying dual scope to the real corpus' {
             $again | Should -BeExactly $json -Because "$($entry.Name) manifest must be a fixed point"
         }
     }
+
+    It 'reports literal parameter rewrites separately from picker-preserving scope' {
+        $parametersPatched = 0
+        $scopedViaPicker = 0
+        foreach ($entry in $script:Applied) {
+            $parametersPatched += [int]$entry.Result.Stats.ParametersPatched
+            $entry.Result.Stats.ScopedViaPicker | Should -Be 0 -Because "$($entry.Name) was scoped in literal mode"
+            $scopedViaPicker += [int]$entry.Result.Stats.ScopedViaPicker
+        }
+        $parametersPatched | Should -BeGreaterThan 0
+        $scopedViaPicker | Should -Be 0
+    }
 }
 
 Describe 'Reverting' {
@@ -479,6 +491,47 @@ Describe 'Self-healing scope' {
         $picker['crossComponentResources'] | Should -Be @('{Subscription}')
     }
 
+    It 'reports picker-preserving query scope without claiming parameter rewrites' {
+        $parametersPatched = 0
+        $scopedViaPicker = 0
+        $eligiblePickerQueries = 0
+
+        foreach ($entry in $script:Healed) {
+            $entry.Result.Stats.ParametersPatched | Should -Be 0 -Because "$($entry.Name) must not rewrite customer parameters in self-healing mode"
+            $parametersPatched += [int]$entry.Result.Stats.ParametersPatched
+            $scopedViaPicker += [int]$entry.Result.Stats.ScopedViaPicker
+
+            $before = ConvertFrom-SerializedWorkbook -Json $entry.Baseline
+            $referencedPickers = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($e in @(Get-WorkbookNode -Root $before)) {
+                if (-not (Test-EligibleQueryNode -Node $e.Node)) { continue }
+                if ((Get-ScopeReferenceKind -Node $e.Node) -eq 'Parameter') {
+                    $eligiblePickerQueries++
+                    $pickerName = Get-ReferencedParameterName -Node $e.Node
+                    if ($pickerName) { [void]$referencedPickers.Add($pickerName) }
+                }
+            }
+
+            foreach ($pickerName in @($referencedPickers)) {
+                $beforeParameters = @(Get-WorkbookNode -Root $before |
+                    Where-Object { (Test-IsParameterNode -Path $_.Path) -and [string]$_.Node['name'] -eq $pickerName } |
+                    ForEach-Object { ConvertTo-Json $_.Node -Depth 100 -Compress })
+                $afterParameters = @(Get-WorkbookNode -Root $entry.Root |
+                    Where-Object { (Test-IsParameterNode -Path $_.Path) -and [string]$_.Node['name'] -eq $pickerName } |
+                    ForEach-Object { ConvertTo-Json $_.Node -Depth 100 -Compress })
+
+                @($afterParameters).Count | Should -Be @($beforeParameters).Count -Because "$($entry.Name) should keep each referenced customer picker"
+                for ($i = 0; $i -lt @($beforeParameters).Count; $i++) {
+                    $afterParameters[$i] | Should -BeExactly $beforeParameters[$i] -Because "$($entry.Name) must leave customer picker $pickerName unchanged"
+                }
+            }
+        }
+
+        $parametersPatched | Should -Be 0
+        $scopedViaPicker | Should -BeGreaterThan 0
+        $scopedViaPicker | Should -Be $eligiblePickerQueries
+    }
+
     It 'is idempotent' {
         foreach ($entry in $script:Healed) {
             $again = ConvertFrom-SerializedWorkbook -Json $entry.Json
@@ -534,4 +587,3 @@ Describe 'Self-healing scope' {
         $second.Action | Should -Be 'Scoped'
     }
 }
-

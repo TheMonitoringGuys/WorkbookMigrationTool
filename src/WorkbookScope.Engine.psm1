@@ -18,9 +18,14 @@
          default resource. Add the array.
       B. A literal token - 'value::selected' or 'value::all'. Replace it, keeping
          the original so revert is exact.
-      C. A parameter reference such as '{Workspace}'. Leave the query alone and
-         patch the *parameter* instead; touching the query would break the link
-         to the picker the user sees in the UI.
+      C. A parameter reference such as '{Workspace}'. Literal mode leaves the
+         query alone and patches the *parameter* instead; touching the query
+         would break the link to the picker the user sees in the UI.
+
+     Self-healing mode keeps the customer's picker untouched. It appends the
+     injected WBScopeSource reference beside the existing picker reference in
+     each query. ParametersPatched counts parameters the tool rewrote; ScopedViaPicker
+     counts queries that kept their own picker and received that extra reference.
 
     Round-trip fidelity was verified against 16 real workbooks: parsing with
     -AsHashtable and re-serialising is lossless apart from a trailing CRLF that
@@ -548,7 +553,7 @@ function Set-WorkbookDualScope {
             return [PSCustomObject]@{
                 Action  = 'AlreadyScoped'
                 Changes = @()
-                Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+                Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
             }
         }
     }
@@ -560,7 +565,7 @@ function Set-WorkbookDualScope {
     }
 
     $changes = [System.Collections.Generic.List[object]]::new()
-    $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+    $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
 
     # One walk, materialised, because the parameter patch needs a name lookup
     # that spans the whole tree and the query pass must not re-walk a mutating
@@ -666,9 +671,10 @@ function Set-WorkbookSelfHealingScope {
         Two things are deliberately NOT done here, and both matter:
 
         - The customer's own workspace picker is never rewritten. Literal mode
-          pins it to both workspaces, which is what makes that mode break on
-          deletion. Here the parameter reference is simply appended alongside it,
-          so the picker keeps the behaviour its author intended.
+          pins it to both workspaces and counts that as ParametersPatched. Here
+          the parameter reference is simply appended alongside it in each query
+          and counted as ScopedViaPicker, so the picker keeps the behaviour its
+          author intended.
         - fallbackResourceIds is left alone. Putting the source there would write
           a literal that cannot self-heal, reintroducing the exact failure this
           mode exists to remove. Every eligible query gets an explicit scope, so
@@ -683,7 +689,7 @@ function Set-WorkbookSelfHealingScope {
     )
 
     $changes = [System.Collections.Generic.List[object]]::new()
-    $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+    $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
 
     # Inserted before anything is recorded: it shifts every items[] index, and a
     # path captured against the pre-insertion tree would address the wrong node
@@ -738,7 +744,7 @@ function Set-WorkbookSelfHealingScope {
         }
         else {
             $changes.Add([ordered]@{ path = $entry.Path; op = 'replaced-ccr'; original = $original; present = $hadKey })
-            if ($kind -eq 'Parameter') { $stats.ParametersPatched++ } else { $stats.Replaced++ }
+            if ($kind -eq 'Parameter') { $stats.ScopedViaPicker++ } else { $stats.Replaced++ }
         }
     }
 
