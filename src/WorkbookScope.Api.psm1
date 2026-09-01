@@ -174,10 +174,18 @@ function Assert-ScopeTokenUsable {
     .SYNOPSIS
         Fails loudly when a token could not produce a valid Authorization header.
     .DESCRIPTION
-        Every message names what to do next. The whole point is to stop a bad
-        header reaching Azure, which reports it as HTTP 502 with a Forbidden
-        message about header format - wording that sends operators to check RBAC
-        for a problem that has nothing to do with permissions.
+        Deliberately checks only the things that actually break a header, rather
+        than asserting a full token shape.
+
+        The distinction matters. An earlier version of this function demanded
+        exactly three base64url segments, which would have refused a padded token
+        or a five-segment JWE - both legitimate - and refused them by claiming the
+        token was bad. A check added to make a confusing failure clearer must not
+        become a new way to fail. Being slightly permissive costs nothing here,
+        because anything that slips through still reaches Azure and is judged
+        there; being too strict breaks environments that worked.
+
+        Every message names what to do next.
     #>
     [CmdletBinding()]
     param(
@@ -201,9 +209,11 @@ function Assert-ScopeTokenUsable {
         throw "The access token for '$ResourceUrl' contains whitespace, so the Authorization header would be malformed. This usually means Get-AzAccessToken returned more than one object. Check for multiple Azure contexts with Get-AzContext -ListAvailable, select one with Set-AzContext, and re-run."
     }
 
-    # A JWT is three base64url segments separated by dots. Anything else would be
-    # rejected by Azure with a message that does not mention the token at all.
-    if ($Token -notmatch '^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*$') {
+    # Every JWT begins "ey", because that is base64 of the opening {" of its
+    # header, and every JWT has at least one dot. Checking those two properties
+    # catches an error string or a placeholder without making assumptions about
+    # segment count or padding.
+    if ($Token -notmatch '^ey' -or $Token -notmatch '\.') {
         $preview = if ($Token.Length -gt 12) { $Token.Substring(0, 12) } else { $Token }
         throw "The value returned for '$ResourceUrl' is not a bearer token (starts '$preview...', length $($Token.Length)). $reconnect"
     }
@@ -461,10 +471,8 @@ function Get-WorkbooksUri {
         [switch]$ExcludeContent
     )
     $v = Get-ScopeApiVersion -Resource 'workbooks'
-    $uri = "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks?category=sentinel&api-version=$v"
-    if (-not $ExcludeContent) {
-        $uri = $uri -replace '\?category=sentinel', '?category=sentinel&canFetchContent=true'
-    }
+    $content = if ($ExcludeContent) { '' } else { '&canFetchContent=true' }
+    $uri = "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks?category=sentinel$content&api-version=$v"
     if ($SourceId) {
         $uri += "&sourceId=$([Uri]::EscapeDataString($SourceId))"
     }

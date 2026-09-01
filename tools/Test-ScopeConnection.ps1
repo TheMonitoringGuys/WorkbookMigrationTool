@@ -182,55 +182,119 @@ Write-Host 'Workbook read' -ForegroundColor White
 Write-Host ('-' * 72) -ForegroundColor DarkGray
 
 $sourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.OperationalInsights/workspaces/$WorkspaceName"
-$uri = "$arm/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks" +
-       "?category=sentinel&canFetchContent=true&api-version=2022-04-01&sourceId=$([uri]::EscapeDataString($sourceId))"
+$base = "$arm/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks?category=sentinel"
+$tail = "&api-version=2022-04-01&sourceId=$([uri]::EscapeDataString($sourceId))"
+
+$headers = @{ 'Authorization' = "Bearer $token"; 'Content-Type' = 'application/json' }
+
+# Two requests, differing only in whether they ask for workbook content. Comparing
+# them is what separates the two causes that produce the same 502:
+#
+#   both fail        -> not size. Same token, same route, same code path, so the
+#                       fault is authentication or the network.
+#   only bulk fails  -> the payload is the problem. The tool's fallback handles it.
+#
+# Without this comparison the message is a guess. With it, it is a measurement.
+function Invoke-Probe {
+    param([string]$Uri, [string]$Label)
+    try {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $raw = Invoke-WebRequest -Uri $Uri -Method GET -Headers $headers -ErrorAction Stop
+        $sw.Stop()
+        $parsed = $raw.Content | ConvertFrom-Json
+        return [PSCustomObject]@{
+            Ok = $true; Label = $Label; Count = @($parsed.value).Count
+            Bytes = $raw.RawContentLength; Ms = $sw.ElapsedMilliseconds
+            Status = 200; Body = $null
+        }
+    }
+    catch {
+        return [PSCustomObject]@{
+            Ok = $false; Label = $Label; Count = 0; Bytes = 0; Ms = 0
+            Status = $(if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 })
+            Body = $(if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message })
+        }
+    }
+}
 
 Write-Check 'Workspace' $WorkspaceName
-Write-Host '       GET .../Microsoft.Insights/workbooks?category=sentinel' -ForegroundColor DarkGray
 
-try {
-    $result = Invoke-RestMethod -Uri $uri -Method GET -Headers @{
-        'Authorization' = "Bearer $token"
-        'Content-Type'  = 'application/json'
-    } -ErrorAction Stop
+Write-Host '       probe 1: listing WITH content (what the tool does first)' -ForegroundColor DarkGray
+$bulk = Invoke-Probe -Uri "$base&canFetchContent=true$tail" -Label 'with content'
+if ($bulk.Ok) {
+    Write-Check '  with content' "$($bulk.Count) workbooks, $([math]::Round($bulk.Bytes/1MB,2)) MB, $($bulk.Ms) ms" 'ok'
+}
+else {
+    Write-Check '  with content' "HTTP $($bulk.Status)" 'bad'
+}
 
-    $count = @($result.value).Count
-    Write-Check 'Workbooks returned' $count 'ok'
-    Write-Host ''
-    Write-Host 'Authentication and workbook access are both working on this machine.' -ForegroundColor Green
-    Write-Host 'If the main tool still fails, the problem is later in the run - send its' -ForegroundColor Green
-    Write-Host 'full output, including the line above the error.' -ForegroundColor Green
+Write-Host '       probe 2: listing WITHOUT content (the fallback path)' -ForegroundColor DarkGray
+$lite = Invoke-Probe -Uri "$base$tail" -Label 'without content'
+if ($lite.Ok) {
+    Write-Check '  without content' "$($lite.Count) workbooks, $([math]::Round($lite.Bytes/1KB,1)) KB, $($lite.Ms) ms" 'ok'
+}
+else {
+    Write-Check '  without content' "HTTP $($lite.Status)" 'bad'
+}
+
+Write-Host ''
+
+# ── Verdict ───────────────────────────────────────────────────────────────────
+if ($bulk.Ok -and $lite.Ok) {
+    Write-Host 'Both requests succeeded. Authentication and workbook access are working.' -ForegroundColor Green
+    Write-Host 'If the tool still fails, the problem is later in the run - send its full' -ForegroundColor Green
+    Write-Host 'output, including the lines above the error.' -ForegroundColor Green
     exit 0
 }
-catch {
-    $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { '(none)' }
-    $body = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
 
-    Write-Check 'Result' "HTTP $status" 'bad'
+if (-not $bulk.Ok -and $lite.Ok) {
+    Write-Host 'DIAGNOSIS: response size.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host $bulk.Body -ForegroundColor Red
+    Write-Host ''
+    Write-Host "The identical request without workbook content succeeded and returned" -ForegroundColor Yellow
+    Write-Host "$([math]::Round($lite.Bytes/1KB,1)) KB. Same token, same route, same permissions - the only" -ForegroundColor Yellow
+    Write-Host 'difference is how much data comes back. Something between this machine and' -ForegroundColor Yellow
+    Write-Host 'Azure will not carry a response that large.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host 'Version 1.2.3 and later handle this automatically: the tool detects the' -ForegroundColor Green
+    Write-Host 'failure and fetches each workbook separately. Upgrade and re-run.' -ForegroundColor Green
+    exit 3
+}
+
+if (-not $lite.Ok) {
+    $body = if ($lite.Body) { $lite.Body } else { $bulk.Body }
+    Write-Host 'DIAGNOSIS: not response size.' -ForegroundColor Yellow
     Write-Host ''
     Write-Host $body -ForegroundColor Red
     Write-Host ''
+    Write-Host 'The small request failed too, so the amount of data is not the cause.' -ForegroundColor Yellow
+    Write-Host ''
 
     if ($body -match 'Authentication information is not given in the correct format') {
-        # Reaching here means the token passed every shape check above and Azure
-        # still rejected the header - so the value is fine and something between
-        # this machine and Azure altered the request. Worth stating plainly,
-        # because it rules out the client and points at the network path.
-        Write-Host 'Azure rejected the header even though the token checks above all passed.' -ForegroundColor Yellow
+        # The token passed every check above and Azure still rejected the header,
+        # so the value this machine produced is fine and something altered the
+        # request in transit. Worth saying plainly: it rules out the client.
+        Write-Host 'Azure rejected the header even though every token check above passed.' -ForegroundColor Yellow
         Write-Host 'That points at something rewriting the request in transit - an inspecting' -ForegroundColor Yellow
         Write-Host 'proxy, TLS interception, or a gateway stripping the Authorization header.' -ForegroundColor Yellow
         Write-Host ''
         Write-Host 'Ask whoever runs the network whether management.azure.com is intercepted,' -ForegroundColor Yellow
         Write-Host 'and try the same command from a machine outside that path.' -ForegroundColor Yellow
     }
-    elseif ($status -eq 403) {
+    elseif ($lite.Status -eq 403) {
         Write-Host 'This is a genuine permissions problem. The signed-in identity needs at' -ForegroundColor Yellow
         Write-Host 'least Reader on the resource group, and Contributor to write workbooks.' -ForegroundColor Yellow
     }
-    elseif ($status -eq 404) {
+    elseif ($lite.Status -eq 404) {
         Write-Host 'The resource group or workspace was not found. Check the names, and that' -ForegroundColor Yellow
         Write-Host 'the context is on the right subscription.' -ForegroundColor Yellow
+    }
+    else {
+        Write-Host 'Send this whole output on for help identifying it.' -ForegroundColor Yellow
     }
 
     exit 2
 }
+
+exit 2

@@ -5,6 +5,48 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.4] - 2026-09-01
+
+### Fixed
+
+- A failure in the fallback listing no longer escapes unexplained. `Get-DestinationWorkbook`
+  called the lightweight listing inside its catch block but not inside a nested `try`, so
+  if that request also failed the exception propagated uncaught and the original error was
+  discarded.
+
+  That lost the most useful fact available. Whether the lightweight request succeeds is
+  precisely what identifies the cause: if the bulk listing fails and the small one
+  succeeds, the payload was the problem; if both fail, the amount of data is irrelevant and
+  the fault is authentication or the network. The error now carries both failures and says
+  which conclusion follows.
+
+- Token validation no longer risks rejecting a valid token. The check introduced in 1.2.2
+  demanded exactly three base64url segments, which would refuse a padded token or a
+  five-segment JWE. Azure's ARM tokens are neither, so it worked - but the cost of being
+  wrong was that the tool would refuse to run in an environment where it previously
+  worked, and would blame the token while doing it.
+
+  It now checks only what actually breaks an `Authorization` header: empty, whitespace, an
+  unconverted `SecureString`, or a value that is not a JWT at all. A check added to make a
+  confusing failure clearer should not become a new way to fail.
+
+### Changed
+
+- `tools/Test-ScopeConnection.ps1` now issues both listings - with and without workbook
+  content - and reports the size and duration of each. Comparing them separates the two
+  causes that produce the same 502:
+
+  - both succeed: authentication and access are fine, look further into the run
+  - only the bulk request fails: response size is the cause, and 1.2.3 or later handles it
+  - both fail: not size; same token and route, so authentication or the network
+
+  Measured against a live environment, the two requests are 1.3 MB and 13.7 KB. Previously
+  the script issued only the bulk request, so it could report that something was wrong but
+  not which of these it was.
+
+- `Get-WorkbooksUri` builds its content query segment directly instead of rewriting the
+  assembled URI with a regular expression.
+
 ## [1.2.3] - 2026-09-01
 
 ### Fixed

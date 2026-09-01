@@ -181,7 +181,37 @@ function Get-DestinationWorkbook {
         $listUri = Get-WorkbooksUri -ArmEndpoint $ArmEndpoint -SubscriptionId $SubscriptionId `
             -ResourceGroupName $ResourceGroupName -SourceId $WorkspaceResourceId -ExcludeContent
 
-        $stubs = @(Invoke-ScopeApiList -Uri $listUri -ThrottleDelayMs $ThrottleDelayMs)
+        # Whether this lighter request succeeds is the single most useful fact
+        # available when something goes wrong here, so its failure must not escape
+        # unexplained. The two outcomes mean different things:
+        #
+        #   bulk fails, this succeeds -> the payload was the problem, and
+        #                                fetching per workbook is the answer
+        #   both fail                 -> not size. The same fault affects a 13 KB
+        #                                request, so look at auth or the network.
+        #
+        # Reporting both errors together is what lets someone tell those apart
+        # without another round trip to the customer.
+        $stubs = $null
+        try {
+            $stubs = @(Invoke-ScopeApiList -Uri $listUri -ThrottleDelayMs $ThrottleDelayMs)
+        }
+        catch {
+            throw @"
+Could not list workbooks in the destination, with or without content.
+
+  Listing with content:    $bulkError
+  Listing without content: $($_.Exception.Message)
+
+The second request returns roughly 14 KB, so response size is not the cause. Both
+requests share one code path, one token and one network route, which points at
+authentication or something between this machine and Azure rather than at the
+workbooks themselves.
+
+Run tools/Test-ScopeConnection.ps1 to identify which.
+"@
+        }
+
         Write-Host "  Listed $($stubs.Count) workbook(s); fetching content individually..." -ForegroundColor Yellow
 
         $hydrated = [System.Collections.Generic.List[object]]::new()

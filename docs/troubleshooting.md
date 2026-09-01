@@ -25,13 +25,33 @@ Authentication information is not given in the correct format. Check the value o
 Authorization header.
 ```
 
-**This is not a permissions problem**, despite the word *Forbidden*. Azure is saying the
-`Authorization` header it received was malformed, so the request never reached the point
-of checking access. Granting roles will not help. The cause is on the machine running
-the tool: `Get-AzAccessToken` returned something that could not be used as a bearer
-token.
+**This is not a permissions problem**, despite the word *Forbidden*. Azure never reached
+the point of checking access. Granting roles will not help.
 
-Three causes, in rough order of likelihood:
+There are two quite different causes, and the diagnostic tells them apart in about thirty
+seconds. Run it first - it prints no token material and only reads, so it is safe against
+production:
+
+```powershell
+./tools/Test-ScopeConnection.ps1 `
+    -SubscriptionId <destination-sub> `
+    -ResourceGroupName <destination-rg> `
+    -WorkspaceName <destination-workspace>
+```
+
+It makes the same listing twice, once asking for workbook content and once not, and
+compares them.
+
+**Only the request with content failed - the cause is response size.** Workbook listings
+include every workbook's full definition, and a destination that has accumulated migrated
+workbooks can return several megabytes in one response. A measured example is 1.3 MB
+against 13.7 KB for the same listing without content. Something between the machine and
+Azure will not carry a body that large. Version 1.2.3 and later detect this and fetch each
+workbook separately, so **upgrading is the fix**.
+
+**Both requests failed - it is not size.** The second is around 14 KB. Both share one
+token, one route and one code path, so the fault is authentication or the network. Three
+conditions produce an unusable header, and the diagnostic names which applies:
 
 1. **The Azure session expired.** Most common with `Connect-AzAccount -UseDeviceAuth`,
    where silent refresh is more fragile. The token comes back empty and the header is
@@ -40,16 +60,6 @@ Three causes, in rough order of likelihood:
    object, and the header ends up holding two tokens separated by a space.
 3. **An outdated Az.Accounts.** Az.Accounts 5.x returns the token as a `SecureString`.
    An old or half-upgraded install can return a shape the tool cannot convert.
-
-**Diagnose it.** This reports which of the three you have, and performs the exact call
-that failed. It prints no token material and only reads:
-
-```powershell
-./tools/Test-ScopeConnection.ps1 `
-    -SubscriptionId <destination-sub> `
-    -ResourceGroupName <destination-rg> `
-    -WorkspaceName <destination-workspace>
-```
 
 **Fix, in order:**
 
