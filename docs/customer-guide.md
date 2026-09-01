@@ -10,7 +10,11 @@ visible.
 
 This tool re-scopes those workbooks so each eligible Log Analytics query reads from
 both workspaces. It does that by setting workbook scope metadata, not by editing KQL.
-When the source workspace is retired, `-Revert` restores destination-only scope.
+
+By default the source workspace is referenced through a hidden parameter that
+resolves only while that workspace exists, so the workbooks keep working when it is
+eventually deleted. `-Revert` is then optional tidy-up rather than a prerequisite for
+decommissioning. See [Scope modes](#scope-modes).
 
 ## Prerequisites
 
@@ -104,6 +108,56 @@ see [troubleshooting](troubleshooting.md#json-config-example) for a complete exa
 `-Execute` prompts before writing unless `-Force` is passed. In unattended automation,
 use `-Force`; otherwise the run stops rather than guessing.
 
+## Scope modes
+
+`-ScopeMode` controls how the source workspace is referenced, and therefore what
+happens when that workspace is eventually deleted.
+
+### SelfHealing (default)
+
+Each eligible query is scoped to the destination workspace as a literal, plus a
+reference to `{WBScopeSource}` — a parameter the tool injects into the workbook. That
+parameter is an Azure Resource Graph resource picker filtered to the single source
+workspace ID.
+
+Resource Graph is an inventory of live resources. Once the source workspace is
+deleted it stops being returned, the parameter resolves to empty, the reference drops
+out of the scope array, and the query runs against the destination alone. The
+workbook keeps rendering.
+
+The injected parameter is marked global so queries nested inside groups can resolve
+it, hidden so viewers never see it, and deliberately not required. A required picker
+with no results blocks every query that depends on it, which would turn the graceful
+degradation into a hard failure.
+
+The customer's own workspace picker is not modified in this mode; the reference is
+appended beside it. `fallbackResourceIds` is left untouched, because a literal there
+could not self-heal.
+
+### Literal
+
+Both workspace resource IDs are written directly into each query's scope array.
+Easier to read in the raw JSON, and it does not depend on Resource Graph — but the
+workbooks stop rendering the moment the source workspace is deleted, and must be
+reverted first.
+
+Use this only if self-healing misbehaves in your tenant.
+
+### Choosing
+
+| | SelfHealing | Literal |
+|---|---|---|
+| Survives source deletion | Yes | No |
+| Revert required before decommissioning | No | Yes |
+| Depends on Resource Graph visibility | Yes | No |
+| Failure mode when a viewer lacks access to the source | Silently shows destination-only data | Visible error |
+| Verified against live Azure | Not yet | Not yet |
+
+Neither mode has been exercised against a live Azure tenant; verification so far is
+offline against saved workbook JSON. Self-healing additionally depends on documented
+Azure behaviour that has not been confirmed end to end, which is why `Literal`
+remains available.
+
 ## CLI parameters
 
 All config keys can be overridden by CLI parameters. CLI values win.
@@ -119,10 +173,11 @@ All config keys can be overridden by CLI parameters. CLI values win.
 | `-DestinationWorkspace <name>` | Destination workspace name, where the workbooks live now. |
 | `-DryRun` | Report what would change and write nothing. This is the default parameter set. |
 | `-Execute` | Apply the changes. Prompts unless `-Force` is also passed. |
-| `-Revert` | Restore destination-only scope. Combine with `-Execute` to apply it. |
+| `-Revert` | Restore destination-only scope. Combine with `-Execute` to apply it. Optional in `SelfHealing` mode, mandatory before decommissioning in `Literal` mode. Works even after the source workspace has been deleted. |
+| `-ScopeMode <SelfHealing\|Literal>` | How the source workspace is referenced. Defaults to `SelfHealing`. See [Scope modes](#scope-modes). |
 | `-Cloud <Commercial\|Gov>` | Azure cloud environment. Defaults to `Commercial` through config normalisation. |
 | `-Force` | Skip the confirmation prompt in execute mode. Required for unattended runs. |
-| `-ValidateQueries` | After scoping, run a real cross-workspace query and compare table coverage. Needs Log Analytics data-plane read access. |
+| `-ValidateQueries` | After scoping, run a real cross-workspace query and compare table coverage. In `SelfHealing` mode it also confirms the injected scope parameter resolves for the running identity. Needs Log Analytics data-plane read access. |
 | `-LookbackDays <n>` | Lookback window for validation table inventory. Valid range is 1 to 365; default is 7. |
 | `-WorkbookFilter <pattern>` | Wildcard match against workbook display names, for example `Azure*`. Empty means all matched workbooks. |
 | `-IncludeAllWorkbooks` | Act on every Sentinel workbook in the destination resource group, not only workbooks tagged as migrated. |

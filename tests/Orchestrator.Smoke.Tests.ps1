@@ -18,7 +18,7 @@ BeforeAll {
     $script:Fixture = Join-Path $PSScriptRoot 'fixtures\workbooks.json'
 
     function Invoke-Orchestrator {
-        param([hashtable]$Parameters = @{}, [switch]$NoWorkbooks)
+        param([hashtable]$Parameters = @{}, [switch]$NoWorkbooks, [switch]$SourceDeleted)
 
         $work = Join-Path ([System.IO.Path]::GetTempPath()) "wbscope-smoke-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $work -Force | Out-Null
@@ -43,6 +43,14 @@ BeforeAll {
             }) -join ' '
 
         $workbooksJson = if ($NoWorkbooks) { '@()' } else { "(Get-Content '$($script:Fixture -replace "'","''")' -Raw | ConvertFrom-Json)" }
+        $sourceBranch = ''
+        if ($SourceDeleted) {
+            $sourceBranch = @"
+    if (`$Uri -match '/workspaces/ws-source\?') {
+        throw 'Response status code does not indicate success: 404 (Not Found).'
+    }
+"@
+        }
 
         # Baked into a generated harness rather than passed as process arguments:
         # a command line containing quotes does not survive argument splitting.
@@ -77,7 +85,7 @@ function global:Invoke-RestMethod {
         Add-Content -Path '$($capture -replace "'","''")' -Value (`$Uri) -Encoding UTF8
         return [PSCustomObject]@{ id = `$Uri; name = 'stub' }
     }
-
+$sourceBranch
     # Workspace GET: existence, location, and the GUID validation needs.
     if (`$Uri -match '/workspaces/[^/?]+\?api-version') {
         return [PSCustomObject]@{
@@ -252,6 +260,42 @@ Describe 'Revert' {
     It 'restores destination-only scope and exits zero' {
         $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; Revert = $true; SkipPreflight = $true }
         $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
+    }
+
+    It 'proceeds with preflight ON when the source workspace has been deleted' {
+        # The recovery path. Reverting is what you do *because* the source is
+        # going away, so its absence must not fail the run - it previously exited
+        # 2, stranding whoever decommissioned before reverting and pushing them
+        # onto -SkipPreflight, which also disables the destination checks.
+        $r = Invoke-Orchestrator -SourceDeleted -Parameters @{ Execute = $true; Force = $true; Revert = $true }
+        $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
+        $r.Stdout | Should -Match '(?i)expected when reverting'
+    }
+
+    It 'still refuses to apply scope when the source workspace has been deleted' {
+        $r = Invoke-Orchestrator -SourceDeleted -Parameters @{ Execute = $true; Force = $true }
+        $r.ExitCode | Should -Be 2
+        ($r.Stdout + $r.Stderr) | Should -Match '(?i)source workspace is not reachable'
+    }
+}
+
+Describe 'Scope mode' {
+
+    It 'defaults to self-healing and says so' {
+        $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true }
+        $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
+        $r.Stdout | Should -Match 'Scope mode:\s+SelfHealing'
+    }
+
+    It 'honours -ScopeMode Literal as the escape hatch' {
+        $r = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true; ScopeMode = 'Literal' }
+        $r.ExitCode | Should -Be 0 -Because "stdout was:`n$($r.Stdout)`n$($r.Stderr)"
+        $r.Stdout | Should -Match 'Scope mode:\s+Literal'
+    }
+
+    It 'rejects an unknown scope mode at bind time' {
+        $r = Invoke-Orchestrator -Parameters @{ DryRun = $true; SkipPreflight = $true; ScopeMode = 'Magic' }
+        $r.ExitCode | Should -Not -Be 0
     }
 }
 

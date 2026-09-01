@@ -32,6 +32,81 @@ function Format-ScopeReportInline {
     return (([string]$Value) -replace '\r?\n', ' ').Trim()
 }
 
+function Get-ScopeModeLabel {
+    param([object]$RunResult)
+    $scopeMode = [string](Get-ScopeProp $RunResult 'ScopeMode')
+    if ([string]::IsNullOrWhiteSpace($scopeMode)) { return 'Literal' }
+    return $scopeMode
+}
+
+function Format-ScopeCommandArgument {
+    param([object]$Value)
+    $escaped = ([string]$Value) -replace "'", "''"
+    return "'$escaped'"
+}
+
+function Get-ScopeRevertCommand {
+    param([object]$RunResult)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add('.\Sentinel-Workbook-Scope-Assistant.ps1') | Out-Null
+    $parts.Add('-SourceSubscriptionId') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.SubscriptionId'))) | Out-Null
+    $parts.Add('-SourceResourceGroup') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.ResourceGroupName'))) | Out-Null
+    $parts.Add('-SourceWorkspace') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.WorkspaceName'))) | Out-Null
+    $parts.Add('-DestinationSubscriptionId') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.SubscriptionId'))) | Out-Null
+    $parts.Add('-DestinationResourceGroup') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.ResourceGroupName'))) | Out-Null
+    $parts.Add('-DestinationWorkspace') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.WorkspaceName'))) | Out-Null
+    $parts.Add('-Revert') | Out-Null
+    $parts.Add('-Execute') | Out-Null
+    $parts.Add('-Force') | Out-Null
+    return ($parts.ToArray() -join ' ')
+}
+
+function Get-ScopeFailedWorkbookNames {
+    param([object]$RunResult)
+    $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
+    return @($results |
+        Where-Object { (Get-NormalizedAction $_.Action) -eq 'Failed' } |
+        ForEach-Object {
+            if ($_.DisplayName) { [string]$_.DisplayName }
+            elseif ($_.WorkbookId) { [string]$_.WorkbookId }
+            else { 'unknown workbook' }
+        })
+}
+
+function Get-ScopeDecommissionReadiness {
+    param([object]$RunResult)
+    $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
+    $scopeMode = Get-ScopeModeLabel -RunResult $RunResult
+    $operation = [string](Get-ScopeProp $RunResult 'Operation')
+    $failedNames = @(Get-ScopeFailedWorkbookNames -RunResult $RunResult)
+    $scoped = @($results | Where-Object { (Get-NormalizedAction $_.Action) -in @('Scoped', 'AlreadyScoped') })
+    $reverted = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Reverted' })
+
+    if ($failedNames.Count -gt 0) {
+        return "Decommission readiness is unknown for failed workbook(s): $($failedNames -join ', '). Fix those failures before turning off the source workspace."
+    }
+
+    if ($operation -eq 'Revert' -or $reverted.Count -gt 0) {
+        return 'The workbooks are back to destination-only scope and the source workspace can be removed.'
+    }
+
+    if ($scoped.Count -gt 0 -and $scopeMode -eq 'SelfHealing') {
+        return 'The scoped workbooks will keep working when the source workspace is deleted; no revert is required first.'
+    }
+
+    if ($scoped.Count -gt 0) {
+        return "The scoped workbooks will stop rendering when the source workspace is deleted and must be reverted first. Revert command: $(Get-ScopeRevertCommand -RunResult $RunResult)"
+    }
+
+    return 'No scoped workbook results were recorded, so decommission readiness cannot be determined from this run.'
+}
+
 function New-ScopeReportTable {
     param(
         [string[]]$Header,
@@ -81,6 +156,7 @@ function Get-ScopeNextSteps {
     $destName = [string](Get-ScopeProp $RunResult 'Destination.WorkspaceName' 'destination workspace')
     $mode = [string](Get-ScopeProp $RunResult 'Mode')
     $operation = [string](Get-ScopeProp $RunResult 'Operation')
+    $scopeMode = Get-ScopeModeLabel -RunResult $RunResult
 
     $steps = [System.Collections.Generic.List[object]]::new()
     $add = {
@@ -98,6 +174,12 @@ function Get-ScopeNextSteps {
         # The backtick before $ escapes it, so the variable would print literally.
         # Build the code-fenced names first, then interpolate them.
         & $add 'Confirm viewer permissions on both workspaces' "Workbook viewers now need Log Analytics Reader on both ``$sourceName`` and ``$destName``. The tool sets each query item's crossComponentResources array so the Workbooks engine unions both workspaces; it does not rewrite KQL." $scoped.Count
+        if ($scopeMode -eq 'Literal') {
+            & $add 'Revert literal scope before decommissioning' "Literal scoped workbooks will stop rendering when the source workspace is deleted. Before removing it, run: ``$(Get-ScopeRevertCommand -RunResult $RunResult)``." $scoped.Count
+        }
+        else {
+            & $add 'Treat revert as optional tidy-up' 'Self-healing scoped workbooks keep rendering after the source workspace is deleted. A later revert is optional tidy-up if you want to remove the hidden source parameter and scope manifest.' $scoped.Count
+        }
     }
 
     $reverted = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Reverted' })
@@ -127,6 +209,10 @@ function Get-ScopeNextSteps {
 
     if ($validation -and $validation.CrossQueryOk -eq $false) {
         & $add 'Fix cross-workspace query validation' "The validation query failed: $($validation.CrossQueryError). Resolve this before relying on combined workbook views." 1
+    }
+
+    if ($validation -and $validation.PSObject.Properties['ScopeParameterResolves'] -and $validation.ScopeParameterResolves -eq $false) {
+        & $add 'Fix self-healing scope parameter validation' "The hidden source parameter did not resolve: $($validation.ScopeParameterError). In self-healing mode this silently hides source data, so resolve it before relying on combined workbook views." 1
     }
 
     $failed = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Failed' })
@@ -168,6 +254,7 @@ function New-ScopeReportContent {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("**Mode:** $(if ($mode -eq 'DryRun') { 'DRY RUN (no changes made)' } elseif ($mode) { $mode } else { 'N/A' })")
     [void]$sb.AppendLine("**Operation:** $(if ($operation) { $operation } else { 'N/A' })")
+    [void]$sb.AppendLine("**Scope mode:** $(Format-ScopeReportInline (Get-ScopeModeLabel -RunResult $RunResult))")
     [void]$sb.AppendLine("**Generated:** $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
     $startTime = Get-ScopeProp $RunResult 'StartTime'
     $endTime = Get-ScopeProp $RunResult 'EndTime'
@@ -196,6 +283,11 @@ function New-ScopeReportContent {
     $kpiRows = [System.Collections.Generic.List[object[]]]::new()
     foreach ($k in (Get-ScopeKpis -RunResult $RunResult).GetEnumerator()) { $kpiRows.Add(@($k.Key, $k.Value)) | Out-Null }
     [void]$sb.AppendLine((New-ScopeReportTable -Header @('Measure', 'Count') -Row $kpiRows))
+
+    [void]$sb.AppendLine('## Decommission Readiness')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine((Format-ScopeReportInline (Get-ScopeDecommissionReadiness -RunResult $RunResult)))
+    [void]$sb.AppendLine('')
 
     [void]$sb.AppendLine('## Next Steps')
     [void]$sb.AppendLine('')
@@ -255,8 +347,18 @@ function New-ScopeReportContent {
     if ($validation) {
         [void]$sb.AppendLine('## Validation')
         [void]$sb.AppendLine('')
+        if ($validation.PSObject.Properties['ScopeParameterResolves'] -and $validation.ScopeParameterResolves -eq $false) {
+            [void]$sb.AppendLine("> **Scope parameter did not resolve.** $(Format-ScopeReportInline $validation.ScopeParameterError)")
+            [void]$sb.AppendLine('')
+        }
         [void]$sb.AppendLine("- **Cross-query OK:** $([bool]$validation.CrossQueryOk)")
         if ($validation.CrossQueryError) { [void]$sb.AppendLine("- **Cross-query error:** $(Format-ScopeReportInline $validation.CrossQueryError)") }
+        if ($validation.PSObject.Properties['ScopeParameterResolves'] -and $null -ne $validation.ScopeParameterResolves) {
+            [void]$sb.AppendLine("- **Scope parameter resolves:** $($validation.ScopeParameterResolves)")
+            if ($validation.ScopeParameterResolves -eq $false -and $validation.ScopeParameterError) {
+                [void]$sb.AppendLine("- **Scope parameter error:** $(Format-ScopeReportInline $validation.ScopeParameterError)")
+            }
+        }
         [void]$sb.AppendLine("- **Source tables:** $(@(ConvertTo-ItemList $validation.SourceTables).Count)")
         [void]$sb.AppendLine("- **Destination tables:** $(@(ConvertTo-ItemList $validation.DestinationTables).Count)")
         [void]$sb.AppendLine("- **Only in source:** $(if (@(ConvertTo-ItemList $validation.OnlyInSource).Count -gt 0) { @(ConvertTo-ItemList $validation.OnlyInSource) -join ', ' } else { 'None' })")

@@ -1,10 +1,16 @@
 # Output from runs - contains customer workspace names and resource IDs
 output/
 
-# Local config - contains real subscription IDs
+# Local config - contains real subscription IDs and workspace names.
+# The pattern deliberately covers any config-like file dropped into samples/, not just
+# the root ones: a real config saved as samples/testconfig.yaml was untracked, held live
+# subscription GUIDs, and would have been committed by the next `git add -A`.
 config.yaml
 config.yml
 config.json
+samples/*config*.yaml
+samples/*config*.yml
+samples/*config*.json
 !samples/config.yaml
 
 # PowerShell / editor noise

@@ -15,6 +15,48 @@ role assignment has propagated.
 
 This is the first thing to check when the run succeeded but the dashboard is blank.
 
+### Workbook shows only destination data, with no error
+
+**Cause:** Self-healing mode only. The injected `{WBScopeSource}` parameter is an
+Azure Resource Graph query. If the viewer cannot see the source workspace through
+Resource Graph — no read access on it, or Resource Graph throttled — the parameter
+resolves to empty, its reference drops out of the scope array, and the query runs
+against the destination alone. That is exactly what is supposed to happen when the
+workspace has been *deleted*, so there is no error to show.
+
+The symptom is subtle: the workbook renders normally, it is simply missing the older
+data. Compare a tile's row count against the same query run directly across both
+workspaces.
+
+**Fix:** Confirm the viewer has read access to the source workspace. Log Analytics
+Reader grants `*/read`, which is sufficient for the workspace to appear in Resource
+Graph. Run with `-ValidateQueries`, which resolves the parameter query as the running
+identity and reports when it comes back empty.
+
+If Resource Graph visibility cannot be granted, use `-ScopeMode Literal` instead. It
+fails loudly rather than quietly, at the cost of having to revert before the source
+workspace is decommissioned.
+
+### Workbooks broke after the source workspace was deleted
+
+**Cause:** They were scoped in `Literal` mode, which writes the source workspace
+resource ID directly into each query. A deleted workspace cannot be resolved, so
+Azure returns *resource not found* and the tile fails. Check the `scopeMode` field in
+the workbook's `$dualScope` manifest, or the scope mode recorded in the run report.
+
+**Fix:** Revert. This works even though the source workspace is already gone — revert
+reads nothing from it.
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
+```
+
+Preflight reports the unreachable source as an expected warning in revert mode rather
+than failing the run, so `-SkipPreflight` is not needed.
+
+To avoid this next time, use the default `SelfHealing` mode, where the reference
+disappears on its own when the workspace does.
+
 ### "No workbooks matched"
 
 **Cause:** By default the tool only scopes workbooks tagged `MigratedFromWorkbookId`,

@@ -89,6 +89,7 @@ function Get-ScopeKpis {
         @($results | Where-Object { (Get-NormalizedAction $_.Action) -match $Pattern }).Count
     }
     [ordered]@{
+        'Scope mode'          = Get-ScopeModeLabel -RunResult $RunResult
         'Workbooks processed' = $results.Count
         'Scoped to both'      = & $countBy '^Scoped$'
         'Reverted'            = & $countBy '^Reverted$'
@@ -100,6 +101,96 @@ function Get-ScopeKpis {
         'Ineligible queries'  = ($results | Measure-Object -Property Ineligible -Sum).Sum
         'Parameters patched'  = ($results | Measure-Object -Property ParametersPatched -Sum).Sum
         'Errors'              = $errors.Count
+    }
+}
+
+function Get-ScopeModeLabel {
+    param([object]$RunResult)
+    $scopeMode = [string](Get-ScopeProp $RunResult 'ScopeMode')
+    if ([string]::IsNullOrWhiteSpace($scopeMode)) { return 'Literal' }
+    return $scopeMode
+}
+
+function Format-ScopeCommandArgument {
+    param([object]$Value)
+    $escaped = ([string]$Value) -replace "'", "''"
+    return "'$escaped'"
+}
+
+function Get-ScopeRevertCommand {
+    param([object]$RunResult)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add('.\Sentinel-Workbook-Scope-Assistant.ps1') | Out-Null
+    $parts.Add('-SourceSubscriptionId') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.SubscriptionId'))) | Out-Null
+    $parts.Add('-SourceResourceGroup') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.ResourceGroupName'))) | Out-Null
+    $parts.Add('-SourceWorkspace') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Source.WorkspaceName'))) | Out-Null
+    $parts.Add('-DestinationSubscriptionId') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.SubscriptionId'))) | Out-Null
+    $parts.Add('-DestinationResourceGroup') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.ResourceGroupName'))) | Out-Null
+    $parts.Add('-DestinationWorkspace') | Out-Null
+    $parts.Add((Format-ScopeCommandArgument (Get-ScopeProp $RunResult 'Destination.WorkspaceName'))) | Out-Null
+    $parts.Add('-Revert') | Out-Null
+    $parts.Add('-Execute') | Out-Null
+    $parts.Add('-Force') | Out-Null
+    return ($parts.ToArray() -join ' ')
+}
+
+function Get-ScopeFailedWorkbookNames {
+    param([object]$RunResult)
+    $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
+    return @($results |
+        Where-Object { (Get-NormalizedAction $_.Action) -eq 'Failed' } |
+        ForEach-Object {
+            if ($_.DisplayName) { [string]$_.DisplayName }
+            elseif ($_.WorkbookId) { [string]$_.WorkbookId }
+            else { 'unknown workbook' }
+        })
+}
+
+function Get-ScopeDecommissionReadiness {
+    param([object]$RunResult)
+    $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
+    $scopeMode = Get-ScopeModeLabel -RunResult $RunResult
+    $operation = [string](Get-ScopeProp $RunResult 'Operation')
+    $failedNames = @(Get-ScopeFailedWorkbookNames -RunResult $RunResult)
+    $scoped = @($results | Where-Object { (Get-NormalizedAction $_.Action) -in @('Scoped', 'AlreadyScoped') })
+    $reverted = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Reverted' })
+
+    if ($failedNames.Count -gt 0) {
+        return [PSCustomObject]@{
+            Tone    = 'bad'
+            Message = "Decommission readiness is unknown for failed workbook(s): $($failedNames -join ', '). Fix those failures before turning off the source workspace."
+        }
+    }
+
+    if ($operation -eq 'Revert' -or $reverted.Count -gt 0) {
+        return [PSCustomObject]@{
+            Tone    = 'good'
+            Message = 'The workbooks are back to destination-only scope and the source workspace can be removed.'
+        }
+    }
+
+    if ($scoped.Count -gt 0 -and $scopeMode -eq 'SelfHealing') {
+        return [PSCustomObject]@{
+            Tone    = 'good'
+            Message = 'The scoped workbooks will keep working when the source workspace is deleted; no revert is required first.'
+        }
+    }
+
+    if ($scoped.Count -gt 0) {
+        return [PSCustomObject]@{
+            Tone    = 'warn'
+            Message = "The scoped workbooks will stop rendering when the source workspace is deleted and must be reverted first. Revert command: $(Get-ScopeRevertCommand -RunResult $RunResult)"
+        }
+    }
+
+    return [PSCustomObject]@{
+        Tone    = 'warn'
+        Message = 'No scoped workbook results were recorded, so decommission readiness cannot be determined from this run.'
     }
 }
 
@@ -124,6 +215,7 @@ function Get-ScopeNextSteps {
     $destName = [string](Get-ScopeProp $RunResult 'Destination.WorkspaceName' 'destination workspace')
     $mode = [string](Get-ScopeProp $RunResult 'Mode')
     $operation = [string](Get-ScopeProp $RunResult 'Operation')
+    $scopeMode = Get-ScopeModeLabel -RunResult $RunResult
     $steps = [System.Collections.Generic.List[object]]::new()
     $add = {
         param($Tone, $Title, $Detail, $Count)
@@ -135,6 +227,12 @@ function Get-ScopeNextSteps {
     $scoped = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Scoped' })
     if ($scoped.Count -gt 0) {
         & $add 'info' 'Confirm viewer permissions on both workspaces' "Workbook viewers now need Log Analytics Reader on both $sourceName and $destName. The tool sets crossComponentResources; no KQL is rewritten." $scoped.Count
+        if ($scopeMode -eq 'Literal') {
+            & $add 'warn' 'Revert literal scope before decommissioning' "Literal scoped workbooks will stop rendering when the source workspace is deleted. Before removing it, run: $(Get-ScopeRevertCommand -RunResult $RunResult)." $scoped.Count
+        }
+        else {
+            & $add 'info' 'Treat revert as optional tidy-up' 'Self-healing scoped workbooks keep rendering after the source workspace is deleted. A later revert is optional tidy-up if you want to remove the hidden source parameter and scope manifest.' $scoped.Count
+        }
     }
     $reverted = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Reverted' })
     if ($reverted.Count -gt 0) {
@@ -160,6 +258,9 @@ function Get-ScopeNextSteps {
     }
     if ($validation -and $validation.CrossQueryOk -eq $false) {
         & $add 'bad' 'Fix cross-workspace query validation' "The validation query failed: $($validation.CrossQueryError). Resolve this before relying on combined workbook views." 1
+    }
+    if ($validation -and $validation.PSObject.Properties['ScopeParameterResolves'] -and $validation.ScopeParameterResolves -eq $false) {
+        & $add 'bad' 'Fix self-healing scope parameter validation' "The hidden source parameter did not resolve: $($validation.ScopeParameterError). In self-healing mode this silently hides source data, so resolve it before relying on combined workbook views." 1
     }
     $failed = @($results | Where-Object { (Get-NormalizedAction $_.Action) -eq 'Failed' })
     if ($failed.Count -gt 0) {
@@ -284,6 +385,9 @@ function ConvertTo-ValidationRows {
     foreach ($t in @(ConvertTo-ItemList $validation.OnlyInSource)) { [PSCustomObject][ordered]@{ Type = 'Only in source'; Workbook = ''; Table = $t; Detail = '' } }
     foreach ($t in @(ConvertTo-ItemList $validation.OnlyInDestination)) { [PSCustomObject][ordered]@{ Type = 'Only in destination'; Workbook = ''; Table = $t; Detail = '' } }
     if ($validation.CrossQueryOk -eq $false) { [PSCustomObject][ordered]@{ Type = 'Cross query'; Workbook = ''; Table = ''; Detail = $validation.CrossQueryError } }
+    if ($validation.PSObject.Properties['ScopeParameterResolves'] -and $validation.ScopeParameterResolves -eq $false) {
+        [PSCustomObject][ordered]@{ Type = 'Scope parameter'; Workbook = ''; Table = ''; Detail = $validation.ScopeParameterError }
+    }
     foreach ($f in @(ConvertTo-ItemList $validation.WorkbookFindings)) {
         foreach ($t in @(ConvertTo-ItemList $f.MissingInDestination)) { [PSCustomObject][ordered]@{ Type = 'Missing in destination'; Workbook = $f.DisplayName; Table = $t; Detail = '' } }
         foreach ($t in @(ConvertTo-ItemList $f.MissingInSource)) { [PSCustomObject][ordered]@{ Type = 'Missing in source'; Workbook = $f.DisplayName; Table = $t; Detail = '' } }
@@ -315,15 +419,30 @@ function New-ScopeValidationHtml {
     $validation = Get-ScopeProp $RunResult 'Validation'
     if (-not $validation) { return '' }
     $rows = @(ConvertTo-ValidationRows -RunResult $RunResult)
+    $scopeParameterAlert = ''
+    if ($validation.PSObject.Properties['ScopeParameterResolves'] -and $validation.ScopeParameterResolves -eq $false) {
+        $scopeParameterAlert = "<div class=""validation-alert""><strong>Scope parameter did not resolve.</strong> $(ConvertTo-ScopeHtmlEncoded $validation.ScopeParameterError)</div>"
+    }
     return @"
   <h2 id="sec-validation">Validation</h2>
   <div class="preflight-grid">
     <div class="mini-card"><div class="mini-label">Cross-query OK</div><div class="mini-value">$([bool]$validation.CrossQueryOk)</div></div>
+    $(if ($validation.PSObject.Properties['ScopeParameterResolves'] -and $null -ne $validation.ScopeParameterResolves) { "<div class=""mini-card""><div class=""mini-label"">Scope parameter resolves</div><div class=""mini-value"">$(ConvertTo-ScopeHtmlEncoded $validation.ScopeParameterResolves)</div></div>" } else { '' })
     <div class="mini-card"><div class="mini-label">Source tables</div><div class="mini-value">$(@(ConvertTo-ItemList $validation.SourceTables).Count)</div></div>
     <div class="mini-card"><div class="mini-label">Destination tables</div><div class="mini-value">$(@(ConvertTo-ItemList $validation.DestinationTables).Count)</div></div>
   </div>
+  $scopeParameterAlert
   $(if ($validation.CrossQueryError) { "<p class=""muted"">$(ConvertTo-ScopeHtmlEncoded $validation.CrossQueryError)</p>" } else { '' })
   $(New-ScopeDetailTable -Title 'Validation Findings' -Rows $rows)
+"@
+}
+
+function New-ScopeReadinessHtml {
+    param([object]$RunResult)
+    $readiness = Get-ScopeDecommissionReadiness -RunResult $RunResult
+    return @"
+  <h2 id="sec-readiness">Decommission Readiness</h2>
+  <div class="readiness tone-$($readiness.Tone)">$(ConvertTo-ScopeHtmlEncoded $readiness.Message)</div>
 "@
 }
 
@@ -397,6 +516,7 @@ function New-ScopeSummaryHtml {
     $duration = ConvertTo-ScopeHtmlEncoded (Format-RunDuration (Get-ScopeProp $RunResult 'Duration'))
     $generated = ConvertTo-ScopeHtmlEncoded (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     $operation = ConvertTo-ScopeHtmlEncoded (Get-ScopeProp $RunResult 'Operation' 'N/A')
+    $scopeMode = ConvertTo-ScopeHtmlEncoded (Get-ScopeModeLabel -RunResult $RunResult)
     $version = ConvertTo-ScopeHtmlEncoded (Get-ScopeProp $RunResult 'ToolVersion' 'N/A')
     $srcWs = ConvertTo-ScopeHtmlEncoded (Get-ScopeProp $RunResult 'Source.WorkspaceName')
     $srcRg = ConvertTo-ScopeHtmlEncoded (Get-ScopeProp $RunResult 'Source.ResourceGroupName')
@@ -425,6 +545,10 @@ function New-ScopeSummaryHtml {
   main { padding:24px 32px 60px; max-width:1200px; margin:0 auto; }
   h2 { border-bottom:1px solid #334155; padding-bottom:8px; margin-top:36px; }
   .dry-banner { background:#451a03; border:1px solid #f59e0b; color:#fde68a; border-radius:10px; padding:12px 16px; margin:18px 0; font-weight:600; }
+  .readiness, .validation-alert { background:var(--card); border:1px solid #334155; border-left:4px solid var(--accent); border-radius:10px; padding:14px 18px; margin:14px 0; line-height:1.55; }
+  .readiness.tone-good { border-left-color:var(--good); }
+  .readiness.tone-warn { border-left-color:var(--warn); }
+  .readiness.tone-bad, .validation-alert { border-left-color:var(--bad); }
   .flow { display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin:18px 0 4px; }
   .ws { background:var(--card); border:1px solid #334155; border-radius:12px; padding:14px 18px; flex:1; min-width:260px; }
   .ws .ws-role { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
@@ -480,7 +604,7 @@ function New-ScopeSummaryHtml {
 <body>
 <header>
   <h1>Sentinel Workbook Scope Assistant</h1>
-  <div class="meta"><span class="badge $modeCls">$(ConvertTo-ScopeHtmlEncoded $mode)</span> &nbsp;|&nbsp; Operation: $operation &nbsp;|&nbsp; Duration: $duration &nbsp;|&nbsp; Generated: $generated &nbsp;|&nbsp; Version: $version</div>
+  <div class="meta"><span class="badge $modeCls">$(ConvertTo-ScopeHtmlEncoded $mode)</span> &nbsp;|&nbsp; Operation: $operation &nbsp;|&nbsp; Scope mode: $scopeMode &nbsp;|&nbsp; Duration: $duration &nbsp;|&nbsp; Generated: $generated &nbsp;|&nbsp; Version: $version</div>
 </header>
 <main>
   $dryBanner
@@ -491,6 +615,7 @@ function New-ScopeSummaryHtml {
   </div>
   <h2>Scope Outcome</h2>
   <div class="kpis">$($cards -join "`n")</div>
+  $(New-ScopeReadinessHtml -RunResult $RunResult)
   <h2>Breakdowns</h2>
   <div class="charts">$($charts -join "`n")</div>
   $(New-ScopeNextStepsHtml -Steps (Get-ScopeNextSteps -RunResult $RunResult))

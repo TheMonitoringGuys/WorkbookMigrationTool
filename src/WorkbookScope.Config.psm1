@@ -143,6 +143,7 @@ function ConvertTo-NormalizedConfig {
         Options     = [PSCustomObject]@{
             DryRun              = $true
             Cloud               = 'Commercial'
+            ScopeMode           = 'SelfHealing'
             Revert              = $false
             ValidateQueries     = $false
             IncludeAllWorkbooks = $false
@@ -174,6 +175,7 @@ function ConvertTo-NormalizedConfig {
     if ($o) {
         $v = Get-ConfigValue -Node $o -Key 'dryRun';              if ($null -ne $v) { $cfg.Options.DryRun = [bool]$v }
         $v = Get-ConfigValue -Node $o -Key 'cloud';               if ($null -ne $v) { $cfg.Options.Cloud = $v }
+        $v = Get-ConfigValue -Node $o -Key 'scopeMode';           if ($null -ne $v) { $cfg.Options.ScopeMode = $v }
         $v = Get-ConfigValue -Node $o -Key 'revert';              if ($null -ne $v) { $cfg.Options.Revert = [bool]$v }
         $v = Get-ConfigValue -Node $o -Key 'validateQueries';     if ($null -ne $v) { $cfg.Options.ValidateQueries = [bool]$v }
         $v = Get-ConfigValue -Node $o -Key 'includeAllWorkbooks'; if ($null -ne $v) { $cfg.Options.IncludeAllWorkbooks = [bool]$v }
@@ -215,6 +217,7 @@ function Merge-ParameterOverrides {
             'DestinationWorkspace'      { $Config.Destination.WorkspaceName = $val }
             'DryRun'                    { $Config.Options.DryRun = [bool]$val }
             'Cloud'                     { $Config.Options.Cloud = $val }
+            'ScopeMode'                 { $Config.Options.ScopeMode = $val }
             'Revert'                    { $Config.Options.Revert = [bool]$val }
             'ValidateQueries'           { $Config.Options.ValidateQueries = [bool]$val }
             'IncludeAllWorkbooks'       { $Config.Options.IncludeAllWorkbooks = [bool]$val }
@@ -246,6 +249,10 @@ function Assert-ConfigValid {
 
     if ($Config.Options.Cloud -notin @('Commercial', 'Gov')) {
         $errors += "options.cloud must be 'Commercial' or 'Gov'"
+    }
+
+    if ($Config.Options.ScopeMode -notin @('SelfHealing', 'Literal')) {
+        $errors += "options.scopeMode must be 'SelfHealing' or 'Literal' (got '$($Config.Options.ScopeMode)')"
     }
 
     if ($Config.Options.RetryCount -lt 0 -or $Config.Options.RetryCount -gt 10) {

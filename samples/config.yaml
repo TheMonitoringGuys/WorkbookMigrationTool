@@ -32,17 +32,38 @@ options:
   # Azure cloud environment: Commercial | Gov
   cloud: "Commercial"
 
-  # Restore destination-only scope. Use this when the source workspace is being
-  # decommissioned - once it is gone, a workbook still pointing at it errors.
+  # How the source workspace is referenced.
+  #
+  #   SelfHealing (default)
+  #     Each query is scoped to the destination plus a hidden parameter that
+  #     resolves to the source workspace only while it exists. Resource Graph
+  #     stops returning a deleted workspace, so the reference simply drops out and
+  #     the workbook carries on showing destination data.
+  #
+  #     This is what lets you turn the old Sentinel off without breaking anything,
+  #     and without having to remember to revert first.
+  #
+  #   Literal
+  #     Writes both workspace resource IDs directly. Easier to read in the raw
+  #     JSON, but the workbooks stop rendering the moment the source workspace is
+  #     deleted - they must be reverted before it is decommissioned. Use this only
+  #     if self-healing misbehaves in your tenant.
+  scopeMode: "SelfHealing"
+
+  # Restore destination-only scope. In SelfHealing mode this is optional tidy-up:
+  # it removes the now-dead parameter. In Literal mode it is mandatory before the
+  # source workspace is deleted.
   revert: false
 
   # After scoping, probe both workspaces: run one real cross-workspace query and
-  # compare which tables hold data in each.
+  # compare which tables hold data in each. In SelfHealing mode it also confirms
+  # the injected scope parameter actually resolves for you - without Resource
+  # Graph visibility of the source workspace, viewers silently see
+  # destination-only data with no error at all.
   #
   # Off by default because it needs Log Analytics data-plane read access, which
   # is a separate grant from the ARM permissions the re-scoping itself needs.
-  # Worth turning on for the first run against any new pair of workspaces: it is
-  # what catches "the workbook updated fine but renders empty".
+  # Worth turning on for the first run against any new pair of workspaces.
   validateQueries: false
 
   # Lookback window for the validateQueries table inventory.

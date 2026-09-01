@@ -6,9 +6,12 @@ another, those workbooks read only the destination workspace. Historical data le
 in the source workspace becomes invisible.
 
 This tool updates the migrated workbooks so their Log Analytics queries read from
-both workspaces. The workbook still lives in the destination Sentinel blade. When
-the source workspace is finally decommissioned, `-Revert` restores destination-only
-scope.
+both workspaces. The workbook still lives in the destination Sentinel blade.
+
+By default the source is referenced in a way that **survives the old workspace being
+deleted**: when you eventually turn the old Sentinel off, the workbooks keep
+rendering against the destination alone. Nothing has to be reverted first. See
+[How scoping works](#how-scoping-works).
 
 ## Requirements
 
@@ -49,9 +52,14 @@ Copy-Item ./samples/config.yaml ./config.yaml    # then edit it
 # 4. Validate data-plane access and table coverage
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute -ValidateQueries
 
-# 5. Later, when the source workspace is decommissioned
+# 5. Later, when the source workspace is decommissioned - optional tidy-up
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
 ```
+
+Step 5 is not a prerequisite for turning the old workspace off. In the default
+self-healing mode the workbooks survive the deletion on their own; reverting just
+removes the now-dead scope parameter. In `-ScopeMode Literal` it *is* mandatory, and
+must be run before the source workspace is deleted.
 
 The sample config is commented, so it doubles as the reference for every option.
 JSON is accepted too, using the same key names, and needs no extra module at all.
@@ -73,22 +81,47 @@ No config file? Pass the workspace values directly:
 
 Each query item in a workbook's JSON may carry a `crossComponentResources` array
 naming the resources it reads. The Workbooks engine unions across those resources.
-This tool sets that array to include the destination workspace first and the source
-workspace second. **No KQL is ever rewritten.** `properties.sourceId` is never
-modified, so the workbook stays attached to the destination Sentinel workspace.
+This tool sets that array. **No KQL is ever rewritten.** `properties.sourceId` is
+never modified, so the workbook stays attached to the destination Sentinel workspace.
 
-Three shapes are handled:
+### Scope modes
+
+| Mode | How the source is referenced | When the source workspace is deleted |
+|---|---|---|
+| `SelfHealing` (default) | Destination as a literal, plus `{WBScopeSource}` — a hidden parameter backed by Azure Resource Graph | Resource Graph stops returning the workspace, the parameter resolves to empty, the reference drops out, and the query runs against the destination alone. **The workbook keeps working.** |
+| `Literal` | Both workspace resource IDs written directly | Azure returns *resource not found* and the tile fails. **The workbooks must be reverted before the workspace is deleted.** |
+
+Self-healing works because the injected parameter is a Resource Graph resource
+picker filtered to exactly one workspace. Resource Graph is an inventory of live
+resources, so a deleted workspace simply stops appearing in the result. The
+parameter is marked global so every query can resolve it, hidden so viewers never
+see it, and deliberately **not** required — a required picker with no results would
+block every query that depends on it, turning the graceful degradation into a hard
+stop.
+
+`Literal` is kept as an escape hatch. Use it if self-healing misbehaves in your
+tenant.
+
+### What each query shape gets
 
 | Shape | Handling |
 |---|---|
-| Query with no explicit scope | Adds `crossComponentResources` with both workspace resource IDs. |
-| Literal `value::selected` or `value::all` | Replaces the literal with both workspace resource IDs and records the original value. |
-| Parameter reference such as `{Workspace}` | Leaves the query alone and re-points the workspace picker parameter at both workspaces. |
+| Query with no explicit scope | Destination literal plus the parameter reference. |
+| Literal `value::selected` or `value::all` | Real resources preserved, then destination plus the parameter reference. |
+| Parameter reference such as `{Workspace}` | The customer's own picker is left alone; the parameter reference is appended beside it. |
+
+Dropdown parameters that are themselves Log Analytics queries — `User`, `Category`,
+`Apps` and similar — are scoped too. Without that, the dropdown would not list values
+that exist only in the old workspace.
+
+In self-healing mode `fallbackResourceIds` is deliberately left untouched: a literal
+there could not self-heal, which would reintroduce the exact failure the mode exists
+to remove.
 
 A measured 16-workbook migration held 533 Log Analytics queries: 290 had no explicit
 scope, 243 were parameter-driven, and none hardcoded a workspace ID or used the
-`workspace()` KQL function. The transform is built around those real shapes and is
-tested offline against saved workbook JSON.
+`workspace()` KQL function. All 523 eligible queries were verified offline to keep a
+usable destination scope after simulating deletion of the source workspace.
 
 ## What it will not do
 
@@ -114,15 +147,35 @@ cross-resource query counts as one API query.
 - Each workbook is snapshotted before the first edit into the run folder's
   `snapshots/` directory.
 - Revert uses three tiers, in order: snapshot restore, embedded `$dualScope` manifest,
-  then a heuristic that strips the source workspace ID. The report states which path
+  then a heuristic that strips the source reference. The report states which path
   was used.
+- Revert works even after the source workspace has been deleted. It reads nothing
+  from the source, so preflight treats an unreachable source as expected when
+  reverting rather than refusing the run.
 
 If a user edits and re-saves a workbook in the Azure portal, the portal's
-re-serialization may drop the embedded manifest. The snapshot in the run folder
-remains the authoritative rollback source.
+re-serialization may drop the embedded manifest or the injected parameter. The
+snapshot in the run folder remains the authoritative rollback source.
 
 With `-IncludeAllWorkbooks`, workbooks installed by a Content Hub solution can have
 this scoping silently reverted by a later solution update.
+
+## Known limitations
+
+**The self-healing behaviour has not been verified against live Azure.** Each
+mechanism it relies on is individually documented by Microsoft — `isGlobal`,
+`isHiddenWhenLocked`, an unset `isRequired`, and an empty parameter collapsing out of
+a resource array that also holds a literal — but the combination has only been
+exercised offline against saved workbook JSON. Validate in a lab before production
+use; `-ScopeMode Literal` is the fallback if it does not behave as documented.
+
+**Self-healing can degrade silently.** If a viewer cannot see the source workspace
+through Resource Graph — missing permission, or Resource Graph throttled — the
+parameter resolves to empty and they get destination-only data with no error at all.
+That is a wrong answer delivered quietly, where the literal mode would have failed
+loudly. Log Analytics Reader grants `*/read`, so anyone who can query the source
+workspace should also see it in Resource Graph, but confirm it with
+`-ValidateQueries`, which checks exactly this.
 
 ## Exit codes
 

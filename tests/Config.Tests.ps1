@@ -167,6 +167,48 @@ Describe 'Validating configuration' {
         $cfg.Options.Cloud = 'Mars'
         { Assert-ConfigValid -Config $cfg } | Should -Throw '*cloud*'
     }
+
+    It 'rejects an unknown scope mode' {
+        $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
+        $cfg.Options.ScopeMode = 'Magic'
+        { Assert-ConfigValid -Config $cfg } | Should -Throw '*scopeMode*'
+    }
+}
+
+Describe 'Scope mode' {
+
+    It 'defaults to SelfHealing' {
+        # The default matters: Literal leaves workbooks that stop rendering the
+        # moment the source workspace is deleted, which is the failure this mode
+        # exists to remove.
+        $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
+        $cfg.Options.ScopeMode | Should -Be 'SelfHealing'
+    }
+
+    It 'reads scopeMode from the config file' {
+        $path = New-ConfigFile -Content @'
+{
+  "source":      { "subscriptionId": "sub-a", "resourceGroupName": "rg-a", "workspaceName": "ws-a" },
+  "destination": { "subscriptionId": "sub-b", "resourceGroupName": "rg-b", "workspaceName": "ws-b" },
+  "options":     { "scopeMode": "Literal" }
+}
+'@
+        (Read-ScopeConfig -Path $path).Options.ScopeMode | Should -Be 'Literal'
+    }
+
+    It 'accepts a command-line override' {
+        $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
+        $merged = Merge-ParameterOverrides -Config $cfg -Overrides @{ ScopeMode = 'Literal' }
+        $merged.Options.ScopeMode | Should -Be 'Literal'
+    }
+
+    It 'accepts both valid modes' {
+        foreach ($mode in @('SelfHealing', 'Literal')) {
+            $cfg = ConvertTo-NormalizedConfig -RawConfig ($script:ValidJson | ConvertFrom-Json)
+            $cfg.Options.ScopeMode = $mode
+            { Assert-ConfigValid -Config $cfg } | Should -Not -Throw
+        }
+    }
 }
 
 Describe 'Reading values from either parser shape' {

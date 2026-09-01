@@ -133,7 +133,7 @@ Describe 'Applying dual scope to the real corpus' {
             $before = Get-WorkbookScopeSummary -Root $root
             $result = Set-WorkbookDualScope -Root $root `
                 -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
-                -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
             $script:Applied += [PSCustomObject]@{
                 Name     = $wb.properties.displayName
                 Root     = $root
@@ -223,7 +223,7 @@ Describe 'Applying dual scope to the real corpus' {
             $json = ConvertTo-SerializedWorkbook -Root $entry.Root
             $again = ConvertFrom-SerializedWorkbook -Json $json
             $second = Set-WorkbookDualScope -Root $again `
-                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId -ScopeMode Literal
             $second.Action | Should -Be 'AlreadyScoped' -Because "$($entry.Name) was already scoped"
             (ConvertTo-SerializedWorkbook -Root $again) | Should -BeExactly $json
         }
@@ -251,7 +251,7 @@ Describe 'Reverting' {
 
             $null = Set-WorkbookDualScope -Root $root `
                 -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
-                -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
 
             $rev = Restore-WorkbookScope -Root $root -SourceWorkspaceId $script:SourceId
             $rev.Method | Should -Be 'Manifest'
@@ -268,7 +268,7 @@ Describe 'Reverting' {
 
             $null = Set-WorkbookDualScope -Root $root `
                 -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
-                -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
 
             $reloaded = ConvertFrom-SerializedWorkbook -Json (ConvertTo-SerializedWorkbook -Root $root)
             $null = Restore-WorkbookScope -Root $reloaded -SourceWorkspaceId $script:SourceId
@@ -288,7 +288,7 @@ Describe 'Reverting' {
 
         $null = Set-WorkbookDualScope -Root $root `
             -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
-            -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
         $null = Restore-WorkbookScope -Root $root -SourceWorkspaceId $script:SourceId
 
         $restored = ConvertTo-SerializedWorkbook -Root $root
@@ -326,7 +326,7 @@ Describe 'Cross-subscription handling' {
 
         $null = Set-WorkbookDualScope -Root $root `
             -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
-            -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
 
         $out = ConvertTo-SerializedWorkbook -Root $root
         $out | Should -Match ([regex]::Escape("/subscriptions/$($script:SourceSub)"))
@@ -339,7 +339,7 @@ Describe 'Cross-subscription handling' {
 
         $null = Set-WorkbookDualScope -Root $root `
             -SourceWorkspaceId $sameSubSource -DestinationWorkspaceId $script:DestId `
-            -SourceSubscriptionId $script:DestSub -DestinationSubscriptionId $script:DestSub
+            -ScopeMode Literal -SourceSubscriptionId $script:DestSub -DestinationSubscriptionId $script:DestSub
 
         (ConvertTo-SerializedWorkbook -Root $root) | Should -Match '\{Subscription\}'
     }
@@ -358,3 +358,180 @@ Describe 'Table extraction for validation' {
         $tables | Should -Not -Contain 'union'
     }
 }
+
+Describe 'Self-healing scope' {
+
+    BeforeAll {
+        $script:Healed = @()
+        foreach ($wb in $script:Corpus) {
+            $root = ConvertFrom-SerializedWorkbook -Json $wb.properties.serializedData
+            $baseline = ConvertTo-SerializedWorkbook -Root $root
+            $result = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode SelfHealing `
+                -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            $manifest = Get-DualScopeManifest -Root $root
+            $script:Healed += [PSCustomObject]@{
+                Name      = $wb.properties.displayName
+                Root      = $root
+                Baseline  = $baseline
+                Result    = $result
+                ParamName = [string]$manifest['scopeParameterName']
+                Json      = ConvertTo-SerializedWorkbook -Root $root
+            }
+        }
+    }
+
+    It 'is the default mode' {
+        # Chosen deliberately: the literal default left workbooks that broke the
+        # moment the source workspace was deleted.
+        $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId
+        [string](Get-DualScopeManifest -Root $root)['scopeMode'] | Should -Be 'SelfHealing'
+    }
+
+    It 'never marks the injected parameter as required' {
+        # The single most important detail in the design. A required picker with
+        # no results blocks every query that depends on it, which would turn the
+        # graceful degradation into a hard failure at exactly the wrong moment.
+        foreach ($entry in $script:Healed) {
+            foreach ($e in @(Get-WorkbookNode -Root $entry.Root)) {
+                if (-not (Test-IsParameterNode -Path $e.Path)) { continue }
+                if ([string]$e.Node['name'] -ne $entry.ParamName) { continue }
+                $e.Node.Contains('isRequired') | Should -BeFalse -Because "$($entry.Name) must let the scope parameter resolve to empty"
+            }
+        }
+    }
+
+    It 'marks the injected parameter global and hidden' {
+        foreach ($entry in $script:Healed) {
+            foreach ($e in @(Get-WorkbookNode -Root $entry.Root)) {
+                if (-not (Test-IsParameterNode -Path $e.Path)) { continue }
+                if ([string]$e.Node['name'] -ne $entry.ParamName) { continue }
+                # Global, or queries inside nested groups cannot resolve it - the
+                # corpus nests parameter blocks four levels deep.
+                $e.Node['isGlobal'] | Should -BeTrue
+                $e.Node['isHiddenWhenLocked'] | Should -BeTrue
+            }
+        }
+    }
+
+    It 'writes no literal source reference outside the parameter query and manifest' {
+        # The manifest is inert bookkeeping and the ARG query is a filter, not a
+        # resource reference the Workbooks engine resolves. Anything else naming
+        # the source workspace would break when it is deleted.
+        foreach ($entry in $script:Healed) {
+            $stripped = ConvertFrom-SerializedWorkbook -Json $entry.Json
+            $null = Remove-ScopeParameter -Root $stripped
+            Remove-DualScopeManifest -Root $stripped
+            (ConvertTo-SerializedWorkbook -Root $stripped) |
+                Should -Not -Match ([regex]::Escape($script:SourceId)) -Because "$($entry.Name) would break when the source is deleted"
+        }
+    }
+
+    It 'leaves every query with a usable scope after the source workspace is deleted' {
+        # The whole point. Deleting the workspace removes it from Resource Graph,
+        # so the parameter resolves empty and its reference drops out. Simulated
+        # here by removing the parameter and discarding its references.
+        foreach ($entry in $script:Healed) {
+            $paramRef = "{$($entry.ParamName)}"
+            $deleted = ConvertFrom-SerializedWorkbook -Json $entry.Json
+            $null = Remove-ScopeParameter -Root $deleted
+
+            foreach ($e in @(Get-WorkbookNode -Root $deleted)) {
+                if (-not (Test-EligibleQueryNode -Node $e.Node)) { continue }
+                $remaining = @(ConvertTo-SafeArray $e.Node['crossComponentResources'] |
+                        ForEach-Object { [string]$_ } | Where-Object { $_ -ne $paramRef })
+                $usable = @($remaining | Where-Object {
+                        $_ -ieq $script:DestId -or $_ -match '^\{.+\}$' -or $_ -match '^value::'
+                    })
+                $usable.Count | Should -BeGreaterThan 0 -Because "$($entry.Name) at $($e.Path) must still resolve to the destination"
+            }
+        }
+    }
+
+    It 'never touches fallbackResourceIds' {
+        # A literal there cannot self-heal, so writing the source into it would
+        # reintroduce the exact failure this mode exists to remove.
+        foreach ($entry in $script:Healed) {
+            $before = ConvertFrom-SerializedWorkbook -Json $entry.Baseline
+            ($entry.Root['fallbackResourceIds'] | ConvertTo-Json -Depth 5 -Compress) |
+                Should -BeExactly ($before['fallbackResourceIds'] | ConvertTo-Json -Depth 5 -Compress) -Because "$($entry.Name) must keep its original default scope"
+        }
+    }
+
+    It 'leaves the customer workspace picker unpinned' {
+        # Literal mode pins the picker to both workspaces, which is what makes it
+        # break on deletion. Here the reference is appended beside it instead, so
+        # the picker keeps the behaviour its author intended.
+        $json = '{"version":"Notebook/1.0","items":[{"type":9,"content":{"parameters":[{"id":"p1","version":"KqlParameterItem/1.0","name":"Workspace","type":5,"query":"resources","crossComponentResources":["{Subscription}"],"queryType":1,"resourceType":"microsoft.resourcegraph/resources"}]},"name":"params"},{"type":3,"content":{"query":"Heartbeat","queryType":0,"resourceType":"microsoft.operationalinsights/workspaces","crossComponentResources":["{Workspace}"]},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+            -ScopeMode SelfHealing -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+        $picker = @(Get-WorkbookNode -Root $root | Where-Object {
+                (Test-IsParameterNode -Path $_.Path) -and [string]$_.Node['name'] -eq 'Workspace'
+            })[0].Node
+        $picker.Contains('value') | Should -BeFalse -Because 'the picker must not be pinned to a fixed pair of workspaces'
+        $picker['crossComponentResources'] | Should -Be @('{Subscription}')
+    }
+
+    It 'is idempotent' {
+        foreach ($entry in $script:Healed) {
+            $again = ConvertFrom-SerializedWorkbook -Json $entry.Json
+            $second = Set-WorkbookDualScope -Root $again `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode SelfHealing -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            $second.Action | Should -Be 'AlreadyScoped' -Because "$($entry.Name) was already scoped"
+            (ConvertTo-SerializedWorkbook -Root $again) | Should -BeExactly $entry.Json
+        }
+    }
+
+    It 'reverts byte-for-byte through the save and reload path' {
+        foreach ($entry in $script:Healed) {
+            $reloaded = ConvertFrom-SerializedWorkbook -Json $entry.Json
+            $rev = Restore-WorkbookScope -Root $reloaded -SourceWorkspaceId $script:SourceId
+            $rev.Method | Should -Be 'Manifest'
+            (ConvertTo-SerializedWorkbook -Root $reloaded) | Should -BeExactly $entry.Baseline -Because "$($entry.Name) must revert exactly"
+        }
+    }
+
+    It 'reverts by heuristic when the manifest has been lost' {
+        # A portal re-save can drop the manifest. The heuristic must still remove
+        # both the parameter and every reference to it.
+        $entry = $script:Healed | Where-Object { $_.Result.Stats.Eligible -gt 0 } | Select-Object -First 1
+        $root = ConvertFrom-SerializedWorkbook -Json $entry.Json
+        Remove-DualScopeManifest -Root $root
+
+        $rev = Restore-WorkbookScope -Root $root -SourceWorkspaceId $script:SourceId
+        $rev.Method | Should -Be 'Heuristic'
+
+        $out = ConvertTo-SerializedWorkbook -Root $root
+        $out | Should -Not -Match ([regex]::Escape("{$($entry.ParamName)}"))
+        Get-ScopeParameterItemIndex -Root $root | Should -Be -1
+    }
+
+    It 'avoids colliding with an existing parameter of the same name' {
+        $json = '{"version":"Notebook/1.0","items":[{"type":9,"content":{"parameters":[{"id":"p1","version":"KqlParameterItem/1.0","name":"WBScopeSource","type":1}]},"name":"params"},{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId -ScopeMode SelfHealing
+        [string](Get-DualScopeManifest -Root $root)['scopeParameterName'] | Should -Not -Be 'WBScopeSource'
+    }
+
+    It 're-scopes a workbook that was previously scoped in literal mode' {
+        # Older runs left the fragile form behind. Re-running must migrate them
+        # rather than reporting AlreadyScoped and leaving them broken-on-delete.
+        $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId -ScopeMode Literal
+        $second = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId -ScopeMode SelfHealing
+        $second.Action | Should -Be 'Scoped'
+    }
+}
+

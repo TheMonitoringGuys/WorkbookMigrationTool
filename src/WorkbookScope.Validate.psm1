@@ -140,6 +140,74 @@ function Test-CrossWorkspaceAccess {
     return [PSCustomObject]@{ Ok = $false; Error = $hint }
 }
 
+function Test-ScopeParameterResolves {
+    <#
+    .SYNOPSIS
+        Proves the hidden self-healing scope parameter can see the source workspace.
+    .DESCRIPTION
+        Self-healing scope depends on an Azure Resource Graph-backed resource
+        picker. If Resource Graph returns no rows for the running identity, the
+        workbook still renders but silently drops the source workspace from every
+        query. This check turns that wrong-answer case into a validation finding.
+    .OUTPUTS
+        PSCustomObject: Resolves, Reason, Skipped.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ArmEndpoint,
+        [Parameter(Mandatory)][string]$SourceWorkspaceId,
+        [string]$SourceSubscriptionId,
+        [int]$ThrottleDelayMs = 100
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SourceSubscriptionId)) {
+        return [PSCustomObject]@{
+            Resolves = $false
+            Reason   = 'Skipped because no source subscription id was supplied for the Resource Graph query.'
+            Skipped  = $true
+        }
+    }
+
+    try {
+        $endpoint = ([string]$ArmEndpoint).TrimEnd('/')
+        $uri = "$endpoint/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01"
+        $query = "resources`n| where type =~ 'microsoft.operationalinsights/workspaces'`n| where id =~ '$SourceWorkspaceId'`n| project value = id, label = id, selected = true"
+        $body = @{
+            subscriptions = @($SourceSubscriptionId)
+            query         = $query
+        }
+
+        $response = Invoke-ScopeApi -Uri $uri -Method POST -Body $body `
+            -ResourceUrl $endpoint -ThrottleDelayMs $ThrottleDelayMs
+
+        $rows = @()
+        if ($response -and $response.PSObject.Properties['data']) {
+            $rows = @(ConvertTo-SafeArray $response.data)
+        }
+
+        if ($rows.Count -gt 0) {
+            return [PSCustomObject]@{ Resolves = $true; Reason = $null; Skipped = $false }
+        }
+
+        return [PSCustomObject]@{
+            Resolves = $false
+            Reason   = 'Azure Resource Graph returned no matching source workspace. In self-healing mode that means the hidden source parameter resolves empty and viewers silently see destination-only data.'
+            Skipped  = $false
+        }
+    }
+    catch {
+        $hint = Format-ApiErrorDetail -ErrorRecord $_
+        if ($hint -match '(?i)forbidden|unauthorized|authorization|permission|does not have access|insufficient') {
+            $hint = "$hint`n    Viewers without Resource Graph visibility of the source workspace will silently see destination-only data."
+        }
+        return [PSCustomObject]@{
+            Resolves = $false
+            Reason   = $hint
+            Skipped  = $false
+        }
+    }
+}
+
 function Invoke-ScopeValidation {
     <#
     .SYNOPSIS
@@ -162,7 +230,10 @@ function Invoke-ScopeValidation {
         [Parameter(Mandatory)][string]$SourceWorkspaceResourceId,
         [object[]]$Workbooks = @(),
         [int]$LookbackDays = 7,
-        [int]$ThrottleDelayMs = 100
+        [int]$ThrottleDelayMs = 100,
+        [string]$ScopeMode = 'SelfHealing',
+        [string]$SourceSubscriptionId,
+        [string]$ArmEndpoint
     )
 
     Write-Host "  Validating query scope against both workspaces..." -ForegroundColor Cyan
@@ -174,7 +245,31 @@ function Invoke-ScopeValidation {
         OnlyInDestination = @()
         CrossQueryOk      = $false
         CrossQueryError   = $null
+        ScopeParameterResolves = $null
+        ScopeParameterError    = $null
         WorkbookFindings  = @()
+    }
+
+    if ($ScopeMode -eq 'SelfHealing' -and -not [string]::IsNullOrWhiteSpace($ArmEndpoint)) {
+        $scopeParameter = Test-ScopeParameterResolves -ArmEndpoint $ArmEndpoint `
+            -SourceWorkspaceId $SourceWorkspaceResourceId `
+            -SourceSubscriptionId $SourceSubscriptionId `
+            -ThrottleDelayMs $ThrottleDelayMs
+
+        if ($scopeParameter.Skipped) {
+            Write-Host "    Scope parameter query: SKIPPED" -ForegroundColor Yellow
+            Write-Host "      $($scopeParameter.Reason)" -ForegroundColor Yellow
+        }
+        elseif ($scopeParameter.Resolves) {
+            Write-Host "    Scope parameter query: OK" -ForegroundColor Green
+        }
+        else {
+            Write-Host "    Scope parameter query: FAILED" -ForegroundColor Red
+            Write-Host "      $($scopeParameter.Reason)" -ForegroundColor Red
+        }
+
+        $validation.ScopeParameterResolves = [bool]$scopeParameter.Resolves
+        $validation.ScopeParameterError = $scopeParameter.Reason
     }
 
     $cross = Test-CrossWorkspaceAccess -LogAnalyticsEndpoint $LogAnalyticsEndpoint `
@@ -255,5 +350,6 @@ Export-ModuleMember -Function @(
     'Invoke-WorkspaceQuery'
     'Get-WorkspaceTableInventory'
     'Test-CrossWorkspaceAccess'
+    'Test-ScopeParameterResolves'
     'Invoke-ScopeValidation'
 )

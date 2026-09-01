@@ -172,18 +172,32 @@ function Invoke-ScopePreflight {
     .SYNOPSIS
         Runs the workbook scoping preflight checks.
     .DESCRIPTION
-        Reachability failures are blocking because the engine cannot read or
-        update the target workbooks without both workspaces. Write permission is
+        Reachability failures are blocking when applying scope, because a workbook
+        cannot be pointed at a workspace that is not there. Write permission is
         blocking only when it is known to be absent; an unknown non-destructive
-        probe is reported as a warning so operators can decide based on role
+        probe is reported as a warning so operators can decide from role
         assignments.
+    .PARAMETER IsRevert
+        Relaxes the source workspace check. Reverting is what an operator does
+        *because* the source workspace is going away, so its absence is the
+        expected state rather than an error - and revert needs nothing from it:
+        the resource ID is built from configuration, and the snapshot and
+        manifest tiers never call the source at all.
+
+        Without this, the recovery path was blocked at exactly the moment it was
+        needed. A run against a deleted source exited 2, while the same run with
+        -SkipPreflight reverted every workbook successfully - so preflight was
+        refusing work that would have succeeded, and the operator had to reach
+        for a flag documented as "not recommended" that also disables the
+        destination checks.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ArmEndpoint,
         [Parameter(Mandatory)][object]$SourceConfig,
         [Parameter(Mandatory)][object]$DestinationConfig,
-        [int]$ThrottleDelayMs = 100
+        [int]$ThrottleDelayMs = 100,
+        [switch]$IsRevert
     )
 
     $errors = [System.Collections.Generic.List[string]]::new()
@@ -201,7 +215,16 @@ function Invoke-ScopePreflight {
         -WorkspaceName $DestinationConfig.WorkspaceName `
         -ThrottleDelayMs $ThrottleDelayMs
 
-    if (-not $source.Reachable) { $errors.Add("Source workspace is not reachable. $($source.Message)") }
+    if (-not $source.Reachable) {
+        if ($IsRevert) {
+            $warnings.Add("Source workspace is not reachable, which is expected when reverting after it has been decommissioned. Revert does not read it. $($source.Message)")
+        }
+        else {
+            $errors.Add("Source workspace is not reachable. $($source.Message)")
+        }
+    }
+    # The destination holds the workbooks being read and written, so it is
+    # blocking in every mode.
     if (-not $destination.Reachable) { $errors.Add("Destination workspace is not reachable. $($destination.Message)") }
 
     $writable = Test-DestinationWritable -ArmEndpoint $ArmEndpoint `

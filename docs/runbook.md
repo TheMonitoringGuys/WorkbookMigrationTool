@@ -119,14 +119,45 @@ If no snapshot path is supplied, revert uses the embedded `$dualScope` manifest 
 workbook. That performs a surgical undo of every recorded change.
 
 If neither snapshot nor manifest is available, revert falls back to a heuristic: it
-strips the source workspace ID from scope lists. The result is usually correct, but it
-cannot know whether a scope array was created by this tool or already existed. The
-report states when this fallback was used.
+strips the source workspace ID and the injected scope parameter from the workbook. The
+result is usually correct, but it cannot know whether a scope array was created by this
+tool or already existed. The report states when this fallback was used.
 
-## Decommissioning revert
+## Decommissioning
 
-Before deleting or disabling the source workspace, put the workbooks back to
-destination-only scope:
+What you do here depends on the scope mode the workbooks were written in. The report
+from the scoping run states it, and so does the `scopeMode` field in each workbook's
+`$dualScope` manifest.
+
+### Self-healing mode (the default)
+
+There is no ordering constraint. The workbooks reference the source workspace through
+a parameter backed by Azure Resource Graph, which stops returning the workspace once
+it is deleted. The reference drops out and the queries run against the destination
+alone.
+
+Turn the source workspace off whenever you are ready. Afterwards, if you want to tidy
+up the now-dead parameter and the scope manifest:
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -DryRun
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
+```
+
+This works before or after the source workspace is deleted. Revert reads nothing from
+the source, so preflight reports an unreachable source as an expected warning rather
+than failing the run.
+
+Before relying on this the first time, confirm the behaviour in a lab. Delete a
+disposable source workspace and open a scoped workbook. The self-healing path is
+built on documented Azure behaviour but has not been verified end to end against a
+live tenant.
+
+### Literal mode
+
+Reverting **is** mandatory, and it must happen before the source workspace is
+deleted. A workbook still holding a literal reference to a deleted workspace returns
+*resource not found* and the tile fails.
 
 ```powershell
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -DryRun
@@ -137,9 +168,12 @@ Review the report and confirm the method. Prefer `Snapshot` if the original run 
 is available. `Manifest` is acceptable. `Heuristic` means the authoritative evidence
 was missing, so sample the resulting workbooks before the source workspace is removed.
 
+If the source workspace has already been deleted and the workbooks are broken, the
+same revert command still fixes them. That path used to be blocked by preflight; it
+is not any more.
+
 After revert, open the destination workbooks and confirm they still render using only
-destination data. A workbook that still references the source will error after the
-source is gone.
+destination data.
 
 ## CI/CD
 

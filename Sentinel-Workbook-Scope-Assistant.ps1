@@ -55,6 +55,19 @@
 .PARAMETER Cloud
     Azure cloud environment: Commercial or Gov.
 
+.PARAMETER ScopeMode
+    How the source workspace is referenced.
+
+    SelfHealing (default) points each query at the destination as a literal plus a
+    hidden parameter that resolves to the source workspace only while it exists.
+    When the source is deleted the parameter resolves to nothing, the reference
+    drops out, and the workbook carries on showing destination data. Nothing has
+    to be reverted before the old workspace is turned off.
+
+    Literal writes both workspace resource IDs directly, which is simpler to read
+    but means the workbooks stop rendering the moment the source is deleted -
+    they must be reverted first. Use it if self-healing misbehaves in your tenant.
+
 .PARAMETER Force
     Skip the confirmation prompt in -Execute mode. Required for unattended runs.
 
@@ -145,6 +158,9 @@ param(
     [ValidateSet('Commercial', 'Gov')]
     [string]$Cloud,
 
+    [ValidateSet('SelfHealing', 'Literal')]
+    [string]$ScopeMode,
+
     [Parameter(ParameterSetName = 'Execute')]
     [switch]$Force,
 
@@ -171,7 +187,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:ToolVersion = '1.0.0'
+$script:ToolVersion = '1.1.0'
 
 # ── Module loading ────────────────────────────────────────────────────────────
 # Import-Module -Force removes a module before re-importing it, and every module
@@ -242,6 +258,7 @@ try {
         DestinationResourceGroup  = 'DestinationResourceGroup'
         DestinationWorkspace      = 'DestinationWorkspace'
         Cloud                     = 'Cloud'
+        ScopeMode                 = 'ScopeMode'
         WorkbookFilter            = 'WorkbookFilter'
         Revert                    = 'Revert'
         ValidateQueries           = 'ValidateQueries'
@@ -282,6 +299,9 @@ try {
 
     Write-Host ''
     Write-Host "  Operation:    $operation ($mode)" -ForegroundColor $(if ($isDryRun) { 'Yellow' } else { 'Green' })
+    if (-not $isRevert) {
+        Write-Host "  Scope mode:   $($config.Options.ScopeMode)" -ForegroundColor White
+    }
     Write-Host "  Source:       $($config.Source.WorkspaceName)" -ForegroundColor White
     Write-Host "  Destination:  $($config.Destination.WorkspaceName)" -ForegroundColor White
 
@@ -298,7 +318,8 @@ try {
     else {
         Write-Step 'Running preflight checks...'
         $preflight = Invoke-ScopePreflight -ArmEndpoint $armEndpoint `
-            -SourceConfig $config.Source -DestinationConfig $config.Destination -ThrottleDelayMs $throttle
+            -SourceConfig $config.Source -DestinationConfig $config.Destination `
+            -ThrottleDelayMs $throttle -IsRevert:$isRevert
 
         foreach ($w in @(ConvertTo-SafeArray $preflight.Warnings)) {
             Write-Host "  ! $w" -ForegroundColor Yellow
@@ -415,6 +436,7 @@ try {
             else {
                 $applied = Set-WorkbookDualScope -Root $root `
                     -SourceWorkspaceId $sourceId -DestinationWorkspaceId $destId `
+                    -ScopeMode $config.Options.ScopeMode `
                     -SourceSubscriptionId $config.Source.SubscriptionId `
                     -DestinationSubscriptionId $config.Destination.SubscriptionId
 
@@ -507,6 +529,7 @@ try {
     $runResult = [PSCustomObject]@{
         StartTime = $startTime; EndTime = $endTime; Duration = ($endTime - $startTime)
         Mode = $mode; Operation = $operation; ToolVersion = $script:ToolVersion
+        ScopeMode = $config.Options.ScopeMode
         Source = [PSCustomObject]@{
             SubscriptionId = $config.Source.SubscriptionId
             ResourceGroupName = $config.Source.ResourceGroupName

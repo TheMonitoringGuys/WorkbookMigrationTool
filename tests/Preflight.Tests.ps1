@@ -117,3 +117,66 @@ Describe 'Preflight result' {
         }
     }
 }
+
+Describe 'Preflight in revert mode' {
+
+    BeforeEach {
+        Mock Test-DestinationWritable -ModuleName WorkbookScope.Preflight {
+            [PSCustomObject]@{ Writable = 'Unknown'; Message = 'Write access was not probed.' }
+        }
+        # The source workspace has been deleted; the destination is still there.
+        Mock Test-WorkspaceReachable -ModuleName WorkbookScope.Preflight {
+            if ($WorkspaceName -eq 'src') {
+                [PSCustomObject]@{ Reachable = $false; Location = $null; CustomerId = $null; ResourceId = '/src'; Message = "Workspace 'src' was not found." }
+            }
+            else {
+                [PSCustomObject]@{ Reachable = $true; Location = 'eastus'; CustomerId = 'dst-guid'; ResourceId = '/dst'; Message = 'ok' }
+            }
+        }
+    }
+
+    It 'lets a revert proceed when the source workspace has been deleted' {
+        # The bug this guards: reverting is what an operator does *because* the
+        # source is going away, and revert reads nothing from it - yet preflight
+        # failed the run with exit 2. The same run with -SkipPreflight reverted
+        # every workbook successfully, so preflight was refusing work that would
+        # have succeeded and pushing operators onto a flag that also disables the
+        # destination checks.
+        $result = Invoke-ScopePreflight -ArmEndpoint 'https://management.azure.com' `
+            -SourceConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-src' -WorkspaceName 'src') `
+            -DestinationConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-dst' -WorkspaceName 'dst') `
+            -ThrottleDelayMs 0 -IsRevert
+
+        $result.Passed | Should -BeTrue
+        ($result.Errors -join "`n") | Should -Not -Match 'Source workspace'
+        ($result.Warnings -join "`n") | Should -Match 'expected when reverting'
+    }
+
+    It 'still refuses to apply scope when the source workspace has been deleted' {
+        # The other half of the contract: you cannot point a workbook at a
+        # workspace that is not there, so applying scope must still fail.
+        $result = Invoke-ScopePreflight -ArmEndpoint 'https://management.azure.com' `
+            -SourceConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-src' -WorkspaceName 'src') `
+            -DestinationConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-dst' -WorkspaceName 'dst') `
+            -ThrottleDelayMs 0
+
+        $result.Passed | Should -BeFalse
+        ($result.Errors -join "`n") | Should -Match 'Source workspace is not reachable'
+    }
+
+    It 'still blocks when the destination is unreachable, even reverting' {
+        # The destination holds the workbooks being read and written, so its
+        # absence is blocking in every mode.
+        Mock Test-WorkspaceReachable -ModuleName WorkbookScope.Preflight {
+            [PSCustomObject]@{ Reachable = $false; Location = $null; CustomerId = $null; ResourceId = '/x'; Message = 'not found' }
+        }
+
+        $result = Invoke-ScopePreflight -ArmEndpoint 'https://management.azure.com' `
+            -SourceConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-src' -WorkspaceName 'src') `
+            -DestinationConfig (New-WorkspaceConfig -SubscriptionId 'sub-a' -ResourceGroupName 'rg-dst' -WorkspaceName 'dst') `
+            -ThrottleDelayMs 0 -IsRevert
+
+        $result.Passed | Should -BeFalse
+        ($result.Errors -join "`n") | Should -Match 'Destination workspace is not reachable'
+    }
+}

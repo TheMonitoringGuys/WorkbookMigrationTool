@@ -30,9 +30,199 @@
 Import-Module (Join-Path $PSScriptRoot 'WorkbookScope.Common.psm1') -Force -DisableNameChecking
 
 $script:ManifestKey = '$dualScope'
-$script:ManifestVersion = 1
+$script:ManifestVersion = 2
 $script:LaResourceType = 'microsoft.operationalinsights/workspaces'
+$script:ArgResourceType = 'microsoft.resourcegraph/resources'
 $script:ToolName = 'Sentinel-Workbook-Scope-Assistant'
+$script:ScopeParameterName = 'WBScopeSource'
+
+# ── Self-healing scope parameter ──────────────────────────────────────────────
+function Get-ScopeParameterName {
+    <#
+    .SYNOPSIS
+        Returns a scope parameter name that does not collide with an existing one.
+    .DESCRIPTION
+        A workbook that already defines a parameter of this name would otherwise
+        have it silently redefined, changing behaviour the customer wrote. The
+        corpus has no collisions today, but a numeric suffix costs nothing and
+        removes the failure mode entirely.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Root)
+
+    $taken = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @(Get-WorkbookNode -Root $Root)) {
+        if (-not (Test-IsParameterNode -Path $entry.Path)) { continue }
+        $n = [string]$entry.Node['name']
+        if ($n) { [void]$taken.Add($n) }
+    }
+
+    if (-not $taken.Contains($script:ScopeParameterName)) { return $script:ScopeParameterName }
+    for ($i = 2; $i -lt 100; $i++) {
+        $candidate = "$($script:ScopeParameterName)$i"
+        if (-not $taken.Contains($candidate)) { return $candidate }
+    }
+    throw "Could not find a free name for the scope parameter."
+}
+
+function New-ScopeParameterItem {
+    <#
+    .SYNOPSIS
+        Builds the hidden parameter that makes dual scope survive deletion.
+    .DESCRIPTION
+        A resource picker backed by Azure Resource Graph, filtered to exactly one
+        workspace. Resource Graph is an inventory of live resources, so once the
+        source workspace is deleted the query returns no rows, the parameter
+        resolves to empty, and every reference to it drops out of the scope lists
+        that mention it. The destination literal beside it keeps the workbook
+        rendering.
+
+        Three flags carry the design, and each matters:
+
+        - isGlobal makes the parameter visible to every step. The corpus nests
+          parameter blocks four levels deep, and a non-global parameter is only
+          visible inside its own group, so without this most queries could not
+          resolve it.
+        - isHiddenWhenLocked keeps it out of the viewer's face. It is still
+          visible when editing the workbook, which is where someone would want to
+          find it.
+        - isRequired is deliberately ABSENT. A required picker with no results
+          blocks every query that depends on it, which would turn the graceful
+          degradation this whole design exists for into a hard failure.
+
+        The id is derived from the source workspace rather than random, so
+        re-running produces a byte-identical parameter and the run stays
+        idempotent.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ParameterName,
+        [Parameter(Mandatory)][string]$SourceWorkspaceId,
+        [string]$SourceSubscriptionId
+    )
+
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    $seed = "wbscope-param:$ParameterName`:$SourceWorkspaceId"
+    $paramId = [guid]::new($md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($seed))).ToString()
+
+    # Matching on the full resource id keeps the result to one row or none. =~ is
+    # case-insensitive because ARM is inconsistent about 'resourceGroups' casing.
+    $query = "resources`n| where type =~ '$($script:LaResourceType)'`n| where id =~ '$SourceWorkspaceId'`n| project value = id, label = id, selected = true"
+
+    $parameter = [ordered]@{
+        id                 = $paramId
+        version            = 'KqlParameterItem/1.0'
+        name               = $ParameterName
+        label              = 'Source workspace (auto)'
+        type               = 5
+        isGlobal           = $true
+        isHiddenWhenLocked = $true
+        multiSelect        = $true
+        quote              = "'"
+        delimiter          = ','
+        query              = $query
+        queryType          = 1
+        resourceType       = $script:ArgResourceType
+        description        = 'Added by the Sentinel Workbook Scope Assistant. Resolves to the migration source workspace while it exists, and to nothing once it is deleted, so this workbook keeps working either way. Safe to delete once the source workspace is gone.'
+    }
+
+    # Resource Graph searches the subscriptions named here. Without the source
+    # subscription an out-of-subscription workspace would never be returned, and
+    # the parameter would look permanently empty.
+    if ($SourceSubscriptionId) {
+        $parameter['crossComponentResources'] = @("/subscriptions/$SourceSubscriptionId")
+    }
+
+    return [ordered]@{
+        type    = 9
+        content = [ordered]@{
+            version    = 'KqlParameterItem/1.0'
+            parameters = @($parameter)
+            style      = 'pills'
+            queryType  = 1
+        }
+        name    = 'wbscope-source-parameter'
+    }
+}
+
+function Get-ScopeParameterItemIndex {
+    <#
+    .SYNOPSIS
+        Index of the injected parameter item in the root items array, or -1.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Root)
+
+    $items = @(ConvertTo-SafeArray $Root['items'])
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        if ($items[$i] -is [System.Collections.IDictionary] -and
+            [string]$items[$i]['name'] -eq 'wbscope-source-parameter') {
+            return $i
+        }
+    }
+    return -1
+}
+
+function Add-ScopeParameter {
+    <#
+    .SYNOPSIS
+        Inserts the scope parameter at the top of the workbook, if not present.
+    .DESCRIPTION
+        Inserted at index 0 so it evaluates ahead of the content that uses it,
+        and so an editor finds it first. This must happen before any manifest
+        path is recorded: inserting shifts every items[] index, and a path
+        recorded against the pre-insertion tree would point at the wrong node on
+        revert.
+    .OUTPUTS
+        The parameter name in use.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Root,
+        [Parameter(Mandatory)][string]$SourceWorkspaceId,
+        [string]$SourceSubscriptionId
+    )
+
+    $existing = Get-ScopeParameterItemIndex -Root $Root
+    if ($existing -ge 0) {
+        $items = @(ConvertTo-SafeArray $Root['items'])
+        $params = @(ConvertTo-SafeArray $items[$existing]['content']['parameters'])
+        if ($params.Count -gt 0) { return [string]$params[0]['name'] }
+    }
+
+    $name = Get-ScopeParameterName -Root $Root
+    $item = New-ScopeParameterItem -ParameterName $name `
+        -SourceWorkspaceId $SourceWorkspaceId -SourceSubscriptionId $SourceSubscriptionId
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $items.Add($item)
+    foreach ($existingItem in @(ConvertTo-SafeArray $Root['items'])) { $items.Add($existingItem) }
+    $Root['items'] = $items.ToArray()
+
+    return $name
+}
+
+function Remove-ScopeParameter {
+    <#
+    .SYNOPSIS
+        Removes the injected parameter item. Returns $true when one was removed.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Root)
+
+    $index = Get-ScopeParameterItemIndex -Root $Root
+    if ($index -lt 0) { return $false }
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $i = 0
+    foreach ($item in @(ConvertTo-SafeArray $Root['items'])) {
+        if ($i -ne $index) { $items.Add($item) }
+        $i++
+    }
+    $Root['items'] = $items.ToArray()
+    return $true
+}
+
 
 # ── Serialisation ─────────────────────────────────────────────────────────────
 function ConvertFrom-SerializedWorkbook {
@@ -288,10 +478,12 @@ function New-DualScopeManifest {
     param(
         [Parameter(Mandatory)][string]$SourceWorkspaceId,
         [Parameter(Mandatory)][string]$DestinationWorkspaceId,
-        [Parameter(Mandatory)][object[]]$Changes
+        [Parameter(Mandatory)][object[]]$Changes,
+        [string]$ScopeMode = 'SelfHealing',
+        [string]$ScopeParameterName
     )
 
-    return [ordered]@{
+    $manifest = [ordered]@{
         version                = $script:ManifestVersion
         tool                   = $script:ToolName
         # Sortable 'u' format, not ISO 'o', for two reasons. ConvertFrom-Json
@@ -301,10 +493,13 @@ function New-DualScopeManifest {
         # under round-trip. 'u' is not recognised as a date, so it survives as
         # the exact string written here and reads back the same in every culture.
         appliedUtc             = (Get-Date).ToUniversalTime().ToString('u')
+        scopeMode              = $ScopeMode
         sourceWorkspaceId      = $SourceWorkspaceId
         destinationWorkspaceId = $DestinationWorkspaceId
-        changes                = @($Changes)
     }
+    if ($ScopeParameterName) { $manifest['scopeParameterName'] = $ScopeParameterName }
+    $manifest['changes'] = @($Changes)
+    return $manifest
 }
 
 # ── Apply ─────────────────────────────────────────────────────────────────────
@@ -314,13 +509,19 @@ function Set-WorkbookDualScope {
         Points every eligible Log Analytics query at both workspaces.
     .DESCRIPTION
         Mutates $Root in place and returns a summary. Idempotent: a workbook
-        already carrying a manifest for the same workspace pair is reported as
-        AlreadyScoped and left untouched.
+        already carrying a manifest for the same workspace pair and scope mode is
+        reported as AlreadyScoped and left untouched.
+    .PARAMETER ScopeMode
+        SelfHealing (default) references the source through a hidden parameter
+        that resolves to nothing once the workspace is deleted, so the workbook
+        keeps rendering and no revert is needed before decommissioning.
+
+        Literal writes both resource IDs directly. Simpler to read, but the
+        workbook stops rendering the moment the source is deleted.
     .PARAMETER SourceSubscriptionId
-        Only used to widen resource-picker parameters when the two workspaces sit
-        in different subscriptions. A picker scoped to '{Subscription}' cannot
-        see across a subscription boundary, so the workspace the user needs to
-        select simply would not be in the list.
+        In SelfHealing mode, the subscription Resource Graph must search to find
+        the source workspace. In Literal mode, used to widen a resource picker
+        when the workspaces are in different subscriptions.
     .OUTPUTS
         PSCustomObject: Action, Changes, Stats.
     #>
@@ -329,6 +530,8 @@ function Set-WorkbookDualScope {
         [Parameter(Mandatory)][object]$Root,
         [Parameter(Mandatory)][string]$SourceWorkspaceId,
         [Parameter(Mandatory)][string]$DestinationWorkspaceId,
+        [ValidateSet('SelfHealing', 'Literal')]
+        [string]$ScopeMode = 'SelfHealing',
         [string]$SourceSubscriptionId,
         [string]$DestinationSubscriptionId
     )
@@ -337,11 +540,23 @@ function Set-WorkbookDualScope {
     if ($existing -and
         [string]$existing['sourceWorkspaceId'] -ieq $SourceWorkspaceId -and
         [string]$existing['destinationWorkspaceId'] -ieq $DestinationWorkspaceId) {
-        return [PSCustomObject]@{
-            Action  = 'AlreadyScoped'
-            Changes = @()
-            Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+        # A manifest written before scopeMode existed is treated as Literal, so an
+        # older run is re-scoped rather than silently left in the fragile mode.
+        $existingMode = 'Literal'
+        if ($existing.Contains('scopeMode') -and $existing['scopeMode']) { $existingMode = [string]$existing['scopeMode'] }
+        if ($existingMode -ieq $ScopeMode) {
+            return [PSCustomObject]@{
+                Action  = 'AlreadyScoped'
+                Changes = @()
+                Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+            }
         }
+    }
+
+    if ($ScopeMode -eq 'SelfHealing') {
+        return Set-WorkbookSelfHealingScope -Root $Root `
+            -SourceWorkspaceId $SourceWorkspaceId -DestinationWorkspaceId $DestinationWorkspaceId `
+            -SourceSubscriptionId $SourceSubscriptionId
     }
 
     $changes = [System.Collections.Generic.List[object]]::new()
@@ -432,6 +647,106 @@ function Set-WorkbookDualScope {
     Set-DualScopeManifest -Root $Root -Manifest (New-DualScopeManifest `
             -SourceWorkspaceId $SourceWorkspaceId `
             -DestinationWorkspaceId $DestinationWorkspaceId `
+            -ScopeMode 'Literal' `
+            -Changes $changes.ToArray())
+
+    return [PSCustomObject]@{ Action = 'Scoped'; Changes = $changes.ToArray(); Stats = $stats }
+}
+
+function Set-WorkbookSelfHealingScope {
+    <#
+    .SYNOPSIS
+        Scopes a workbook so it survives the source workspace being deleted.
+    .DESCRIPTION
+        Each eligible query gets the destination as a hard literal plus a
+        reference to the injected parameter. The parameter resolves to the source
+        workspace while it exists and to nothing afterwards, at which point the
+        reference drops out and the query runs against the destination alone.
+
+        Two things are deliberately NOT done here, and both matter:
+
+        - The customer's own workspace picker is never rewritten. Literal mode
+          pins it to both workspaces, which is what makes that mode break on
+          deletion. Here the parameter reference is simply appended alongside it,
+          so the picker keeps the behaviour its author intended.
+        - fallbackResourceIds is left alone. Putting the source there would write
+          a literal that cannot self-heal, reintroducing the exact failure this
+          mode exists to remove. Every eligible query gets an explicit scope, so
+          the workbook-level default is correctly destination-only.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Root,
+        [Parameter(Mandatory)][string]$SourceWorkspaceId,
+        [Parameter(Mandatory)][string]$DestinationWorkspaceId,
+        [string]$SourceSubscriptionId
+    )
+
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; Fallback = 0; Skipped = 0 }
+
+    # Inserted before anything is recorded: it shifts every items[] index, and a
+    # path captured against the pre-insertion tree would address the wrong node
+    # when revert replays it.
+    $paramName = Add-ScopeParameter -Root $Root `
+        -SourceWorkspaceId $SourceWorkspaceId -SourceSubscriptionId $SourceSubscriptionId
+    $paramRef = "{$paramName}"
+    $changes.Add([ordered]@{ path = '$'; op = 'added-scope-parameter'; parameter = $paramName })
+
+    foreach ($entry in @(Get-WorkbookNode -Root $Root)) {
+        $node = $entry.Node
+        if (-not (Test-EligibleQueryNode -Node $node)) { continue }
+        $stats.Eligible++
+
+        $kind = Get-ScopeReferenceKind -Node $node
+        $hadKey = $node.Contains('crossComponentResources')
+        $original = @()
+        if ($hadKey) {
+            $original = @(ConvertTo-SafeArray $node['crossComponentResources'] | ForEach-Object { [string]$_ })
+        }
+
+        if ($original -contains $paramRef) {
+            $stats.Skipped++
+            continue
+        }
+
+        $newList = [System.Collections.Generic.List[string]]::new()
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+        if ($kind -eq 'Parameter') {
+            # Keep the customer's picker exactly as it is and union our source
+            # alongside it.
+            foreach ($v in $original) { if ($seen.Add($v)) { $newList.Add($v) } }
+        }
+        else {
+            # Destination first so it stays the workbook's primary context, then
+            # anything real the query already read, minus tokens we are replacing.
+            if ($seen.Add($DestinationWorkspaceId)) { $newList.Add($DestinationWorkspaceId) }
+            foreach ($v in $original) {
+                if ($v -match '^value::') { continue }
+                if ($v -ieq $SourceWorkspaceId) { continue }
+                if ($seen.Add($v)) { $newList.Add($v) }
+            }
+        }
+        if ($seen.Add($paramRef)) { $newList.Add($paramRef) }
+
+        $node['crossComponentResources'] = $newList.ToArray()
+
+        if ($kind -eq 'None') {
+            $changes.Add([ordered]@{ path = $entry.Path; op = 'added-ccr' })
+            $stats.Added++
+        }
+        else {
+            $changes.Add([ordered]@{ path = $entry.Path; op = 'replaced-ccr'; original = $original; present = $hadKey })
+            if ($kind -eq 'Parameter') { $stats.ParametersPatched++ } else { $stats.Replaced++ }
+        }
+    }
+
+    Set-DualScopeManifest -Root $Root -Manifest (New-DualScopeManifest `
+            -SourceWorkspaceId $SourceWorkspaceId `
+            -DestinationWorkspaceId $DestinationWorkspaceId `
+            -ScopeMode 'SelfHealing' `
+            -ScopeParameterName $paramName `
             -Changes $changes.ToArray())
 
     return [PSCustomObject]@{ Action = 'Scoped'; Changes = $changes.ToArray(); Stats = $stats }
@@ -576,7 +891,17 @@ function Restore-FromManifest {
                     $undone.Add($c)
                 }
                 'replaced-ccr' {
-                    $entry.Node['crossComponentResources'] = @(ConvertTo-SafeArray $c['original'] | ForEach-Object { [string]$_ })
+                    # `present` is recorded by self-healing mode; a manifest from
+                    # literal mode omits it, and in that mode the key always
+                    # existed, so a missing flag means "restore the original".
+                    $hadKey = $true
+                    if ($c.Contains('present')) { $hadKey = ($c['present'] -eq $true) }
+                    if ($hadKey) {
+                        $entry.Node['crossComponentResources'] = @(ConvertTo-SafeArray $c['original'] | ForEach-Object { [string]$_ })
+                    }
+                    elseif ($entry.Node.Contains('crossComponentResources')) {
+                        $entry.Node.Remove('crossComponentResources')
+                    }
                     $undone.Add($c)
                 }
                 'patched-param' {
@@ -604,13 +929,25 @@ function Restore-FromManifest {
         $undone.Add($c)
     }
 
+    # Removed last, because taking the item out shifts every items[] index and
+    # would invalidate the paths the walk above is still matching against.
+    foreach ($c in @(ConvertTo-SafeArray $Manifest['changes'])) {
+        if ([string]$c['op'] -ne 'added-scope-parameter') { continue }
+        if (Remove-ScopeParameter -Root $Root) { $undone.Add($c) }
+    }
+
     return [PSCustomObject]@{ Action = 'Reverted'; Method = 'Manifest'; Changes = $undone.ToArray() }
 }
 
 function Restore-ByHeuristic {
     <#
     .SYNOPSIS
-        Strips the source workspace ID from every scope list in the workbook.
+        Strips the source workspace from every scope list in the workbook.
+    .DESCRIPTION
+        Covers both modes: the literal source resource ID, and the self-healing
+        parameter reference along with the parameter item itself. Used only when
+        neither a snapshot nor a manifest is available, so it works from what the
+        workbook currently says rather than from a record of what was changed.
     #>
     [CmdletBinding()]
     param(
@@ -620,10 +957,23 @@ function Restore-ByHeuristic {
 
     $undone = [System.Collections.Generic.List[object]]::new()
 
+    # Identify the injected parameter first so its reference can be stripped in
+    # the same pass as the literal.
+    $paramRefs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $paramIndex = Get-ScopeParameterItemIndex -Root $Root
+    if ($paramIndex -ge 0) {
+        $items = @(ConvertTo-SafeArray $Root['items'])
+        foreach ($p in @(ConvertTo-SafeArray $items[$paramIndex]['content']['parameters'])) {
+            $n = [string]$p['name']
+            if ($n) { [void]$paramRefs.Add("{$n}") }
+        }
+    }
+
     foreach ($entry in @(Get-WorkbookNode -Root $Root)) {
+        if ($entry.Node -isnot [System.Collections.IDictionary]) { continue }
         if (-not $entry.Node.Contains('crossComponentResources')) { continue }
         $values = @(ConvertTo-SafeArray $entry.Node['crossComponentResources'] | ForEach-Object { [string]$_ })
-        $kept = @($values | Where-Object { $_ -ine $SourceWorkspaceId })
+        $kept = @($values | Where-Object { $_ -ine $SourceWorkspaceId -and -not $paramRefs.Contains($_) })
         if ($kept.Count -eq $values.Count) { continue }
 
         if ($kept.Count -eq 0) { $entry.Node.Remove('crossComponentResources') }
@@ -639,6 +989,11 @@ function Restore-ByHeuristic {
             else { $Root['fallbackResourceIds'] = $kept }
             $undone.Add([ordered]@{ path = '$'; op = 'stripped-fallback' })
         }
+    }
+
+    # Last, for the same index-shifting reason as the manifest path.
+    if (Remove-ScopeParameter -Root $Root) {
+        $undone.Add([ordered]@{ path = '$'; op = 'removed-scope-parameter' })
     }
 
     $action = if ($undone.Count -gt 0) { 'Reverted' } else { 'NotScoped' }
@@ -811,10 +1166,16 @@ Export-ModuleMember -Function @(
     'Remove-DualScopeManifest'
     'New-DualScopeManifest'
     'Set-WorkbookDualScope'
+    'Set-WorkbookSelfHealingScope'
     'Set-ParameterDualScope'
     'Restore-WorkbookScope'
     'Restore-FromManifest'
     'Restore-ByHeuristic'
     'Get-WorkbookScopeSummary'
     'Get-WorkbookQueryTable'
+    'Get-ScopeParameterName'
+    'New-ScopeParameterItem'
+    'Get-ScopeParameterItemIndex'
+    'Add-ScopeParameter'
+    'Remove-ScopeParameter'
 )
