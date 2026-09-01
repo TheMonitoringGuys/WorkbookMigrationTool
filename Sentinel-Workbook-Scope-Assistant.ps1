@@ -194,7 +194,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:ToolVersion = '1.2.2'
+$script:ToolVersion = '1.2.3'
 
 # ── Module loading ────────────────────────────────────────────────────────────
 # Import-Module -Force removes a module before re-importing it, and every module

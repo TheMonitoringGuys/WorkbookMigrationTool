@@ -137,6 +137,12 @@ function Get-DestinationWorkbook {
         bound to the destination workspace. That includes workbooks the migration
         never created, such as workbooks installed from a Content Hub solution;
         a later solution update can revert those workbooks.
+
+        The listing is done in one request that carries every workbook's content,
+        because that is by far the cheapest way to do it. When that request fails
+        the function falls back to listing metadata only and fetching each
+        workbook's content separately - many small requests instead of one large
+        one. See the comment at the fallback for why.
     #>
     [CmdletBinding()]
     param(
@@ -153,7 +159,62 @@ function Get-DestinationWorkbook {
         -ResourceGroupName $ResourceGroupName -SourceId $WorkspaceResourceId
 
     Write-Host "  Fetching workbooks from destination..." -ForegroundColor Cyan
-    $workbooks = @(Invoke-ScopeApiList -Uri $uri -ThrottleDelayMs $ThrottleDelayMs)
+
+    $workbooks = $null
+    try {
+        $workbooks = @(Invoke-ScopeApiList -Uri $uri -ThrottleDelayMs $ThrottleDelayMs)
+    }
+    catch {
+        # A single request asking for every workbook's content can return several
+        # megabytes. This tool reads the destination, which holds every migrated
+        # workbook, so its response is much larger than the equivalent call in the
+        # Sentinel Migration Assistant even though the request is identical. An
+        # intermediary that refuses a body that size reports it as a gateway
+        # error, and the accompanying text is frequently misleading.
+        #
+        # Rather than fail, ask for the same data in pieces small enough that no
+        # single response is large. Slower, but it completes.
+        $bulkError = $_.Exception.Message
+        Write-Warning "Listing workbooks with content failed: $bulkError"
+        Write-Host "  Retrying without bulk content, one workbook at a time..." -ForegroundColor Yellow
+
+        $listUri = Get-WorkbooksUri -ArmEndpoint $ArmEndpoint -SubscriptionId $SubscriptionId `
+            -ResourceGroupName $ResourceGroupName -SourceId $WorkspaceResourceId -ExcludeContent
+
+        $stubs = @(Invoke-ScopeApiList -Uri $listUri -ThrottleDelayMs $ThrottleDelayMs)
+        Write-Host "  Listed $($stubs.Count) workbook(s); fetching content individually..." -ForegroundColor Yellow
+
+        $hydrated = [System.Collections.Generic.List[object]]::new()
+        $failed = 0
+        foreach ($stub in $stubs) {
+            if (-not $stub.id) { continue }
+            # The list returns full ARM resource IDs; the item URI builder wants
+            # just the workbook's name segment.
+            $wbId = ($stub.id -split '/')[-1]
+            try {
+                $itemUri = Get-WorkbookUri -ArmEndpoint $ArmEndpoint -SubscriptionId $SubscriptionId `
+                    -ResourceGroupName $ResourceGroupName -WorkbookId $wbId -IncludeContent
+                $full = Invoke-ScopeApi -Uri $itemUri -Method GET -ThrottleDelayMs $ThrottleDelayMs
+                if ($full) { $hydrated.Add($full) }
+            }
+            catch {
+                # One unreadable workbook must not cost the other fifteen. It is
+                # counted and named so the run is never silently partial.
+                $failed++
+                Write-Warning "  Could not read workbook '$wbId': $($_.Exception.Message)"
+            }
+        }
+
+        if ($hydrated.Count -eq 0) {
+            throw "Could not read any workbook content from the destination. The bulk listing failed and every individual fetch failed too. Original error: $bulkError"
+        }
+        if ($failed -gt 0) {
+            Write-Warning "  $failed workbook(s) could not be read and are excluded from this run."
+        }
+
+        $workbooks = @($hydrated)
+    }
+
     $total = $workbooks.Count
 
     if ($IncludeAllWorkbooks) {

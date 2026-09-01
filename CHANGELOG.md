@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.3] - 2026-09-01
+
+### Fixed
+
+- Workbook discovery no longer fails outright when the bulk listing is rejected.
+
+  The listing asks ARM for every workbook's `serializedData` in a single response
+  via `canFetchContent=true`. Measured against a real environment, sixteen
+  workbooks come back as **1.29 MB in one response**, with the largest single
+  workbook at 807 KB. An intermediary unwilling to carry a body that size reports
+  a gateway error, and the text accompanying it is often misleading.
+
+  This is the same request the Sentinel Migration Assistant makes, and its code is
+  identical - the two were diffed line by line across token acquisition, header
+  construction, invocation, URI building and context handling, and no functional
+  difference exists. What differs is the target: the migration assistant reads the
+  *source*, while this tool reads the *destination*, which has accumulated every
+  migrated workbook. Same request, considerably more payload.
+
+  When the bulk listing fails, discovery now lists metadata only and fetches each
+  workbook's content individually. The same listing drops to **13.7 KB**, and the
+  largest single response becomes 807 KB rather than 1.29 MB. Slower, but it
+  completes.
+
+  A workbook that cannot be read individually is reported and skipped rather than
+  losing the whole run, and the run fails loudly if nothing at all could be read -
+  returning an empty set would look like a clean run that silently changed nothing.
+
+- `Get-WorkbookUri` gained `-IncludeContent`. Without `canFetchContent`, a GET on a
+  single workbook returns metadata and an **empty** `serializedData`. Verified
+  against ARM: the same workbook returns 0 characters without it and 1548 with it.
+  The first version of the fallback above missed this and would have recovered
+  sixteen workbooks with no content in any of them - reporting success while
+  scoping nothing. Caught by testing against live Azure rather than a mock.
+
 ## [1.2.2] - 2026-09-01
 
 ### Fixed

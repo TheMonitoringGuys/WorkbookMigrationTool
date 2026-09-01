@@ -437,16 +437,34 @@ function Get-WorkbooksUri {
         The workspace resource ID a workbook is bound to. Passing it keeps the
         list to workbooks belonging to that workspace, which matters when source
         and destination share a resource group.
+    .PARAMETER ExcludeContent
+        Omits canFetchContent, so the response carries metadata only.
+
+        canFetchContent=true returns the full serializedData of every workbook in
+        a single response. In this tool's own corpus one workbook serialises to
+        807 KB, so sixteen of them is a multi-megabyte body from one GET. That is
+        fine against ARM directly and is what the Sentinel Migration Assistant
+        does, but the migration assistant reads the *source*, whereas this tool
+        reads the *destination* - which has accumulated every migrated workbook.
+        Same request, substantially more payload.
+
+        A large response is a plausible way to earn a 502 from an intermediary,
+        so the caller can list cheaply with this switch and then fetch each
+        workbook's content on its own.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ArmEndpoint,
         [Parameter(Mandatory)][string]$SubscriptionId,
         [Parameter(Mandatory)][string]$ResourceGroupName,
-        [string]$SourceId
+        [string]$SourceId,
+        [switch]$ExcludeContent
     )
     $v = Get-ScopeApiVersion -Resource 'workbooks'
-    $uri = "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks?category=sentinel&canFetchContent=true&api-version=$v"
+    $uri = "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks?category=sentinel&api-version=$v"
+    if (-not $ExcludeContent) {
+        $uri = $uri -replace '\?category=sentinel', '?category=sentinel&canFetchContent=true'
+    }
     if ($SourceId) {
         $uri += "&sourceId=$([Uri]::EscapeDataString($SourceId))"
     }
@@ -454,15 +472,29 @@ function Get-WorkbooksUri {
 }
 
 function Get-WorkbookUri {
+    <#
+    .SYNOPSIS
+        URI for a single workbook resource.
+    .PARAMETER IncludeContent
+        Adds canFetchContent, without which a GET returns the workbook's metadata
+        and an empty serializedData. Verified against ARM: the same workbook
+        returns 0 characters of content without it and 1548 with it.
+
+        Not set by default, because the write path sends content rather than
+        asking for it.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ArmEndpoint,
         [Parameter(Mandatory)][string]$SubscriptionId,
         [Parameter(Mandatory)][string]$ResourceGroupName,
-        [Parameter(Mandatory)][string]$WorkbookId
+        [Parameter(Mandatory)][string]$WorkbookId,
+        [switch]$IncludeContent
     )
     $v = Get-ScopeApiVersion -Resource 'workbooks'
-    return "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks/$($WorkbookId)?api-version=$v"
+    $uri = "$ArmEndpoint/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/workbooks/$($WorkbookId)?api-version=$v"
+    if ($IncludeContent) { $uri += '&canFetchContent=true' }
+    return $uri
 }
 
 function Get-LogAnalyticsQueryUri {
