@@ -599,3 +599,72 @@ Describe 'Self-healing scope' {
         $second.Action | Should -Be 'Scoped'
     }
 }
+
+Describe 'Switching a self-healed workbook back to literal' {
+
+    # The customer-facing bug this guards: changing the default to Literal was not
+    # enough on its own. Re-running over a self-healed workbook rewrote the scope
+    # lists but left the injected Resource Graph parameter in place - still global,
+    # still evaluated on every load - so viewers without subscription-scope read
+    # kept getting HTTP 502 from a run that reported success.
+
+    It 'removes the injected parameter and every reference to it' {
+        foreach ($wb in $script:Corpus) {
+            $root = ConvertFrom-SerializedWorkbook -Json $wb.properties.serializedData
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode SelfHealing -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            $paramName = [string](Get-DualScopeManifest -Root $root)['scopeParameterName']
+
+            # Reload, as a real re-run reads the workbook back from ARM.
+            $reloaded = ConvertFrom-SerializedWorkbook -Json (ConvertTo-SerializedWorkbook -Root $root)
+            $null = Set-WorkbookDualScope -Root $reloaded `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+            Get-ScopeParameterItemIndex -Root $reloaded | Should -Be -1 -Because "$($wb.properties.displayName) must not keep the injected parameter"
+            (ConvertTo-SerializedWorkbook -Root $reloaded) |
+                Should -Not -Match ([regex]::Escape("{$paramName}")) -Because "$($wb.properties.displayName) must not keep a reference to it"
+        }
+    }
+
+    It 'leaves the workbook correctly scoped to both workspaces afterwards' {
+        foreach ($wb in $script:Corpus) {
+            $root = ConvertFrom-SerializedWorkbook -Json $wb.properties.serializedData
+            if ((Get-WorkbookScopeSummary -Root $root).Eligible -eq 0) { continue }
+
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode SelfHealing -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+            $reloaded = ConvertFrom-SerializedWorkbook -Json (ConvertTo-SerializedWorkbook -Root $root)
+            $null = Set-WorkbookDualScope -Root $reloaded `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+            # Cleaning up must not cost the workbook its dual scope.
+            $out = ConvertTo-SerializedWorkbook -Root $reloaded
+            $out | Should -Match ([regex]::Escape($script:SourceId)) -Because "$($wb.properties.displayName) must still read the source"
+        }
+    }
+
+    It 'does nothing to a workbook that was never self-healed' {
+        $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $result = Remove-SelfHealingArtifact -Root $root
+        $result.Removed | Should -BeFalse
+        $result.ReferencesCleared | Should -Be 0
+    }
+
+    It 'still cleans up when the manifest has been lost to a portal re-save' {
+        $json = '{"version":"Notebook/1.0","items":[{"type":3,"content":{"query":"Heartbeat","queryType":0},"name":"q1"}]}'
+        $root = ConvertFrom-SerializedWorkbook -Json $json
+        $null = Set-WorkbookDualScope -Root $root `
+            -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+            -ScopeMode SelfHealing -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+        Remove-DualScopeManifest -Root $root
+
+        $result = Remove-SelfHealingArtifact -Root $root
+        $result.Removed | Should -BeTrue -Because 'the parameter item itself is the fallback record'
+        Get-ScopeParameterItemIndex -Root $root | Should -Be -1
+    }
+}

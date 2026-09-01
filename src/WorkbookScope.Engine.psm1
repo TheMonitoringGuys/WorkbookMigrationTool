@@ -507,6 +507,76 @@ function New-DualScopeManifest {
     return $manifest
 }
 
+function Remove-SelfHealingArtifact {
+    <#
+    .SYNOPSIS
+        Strips the injected scope parameter and every reference to it.
+    .DESCRIPTION
+        Needed when a workbook scoped in SelfHealing mode is re-scoped as Literal.
+        Changing the mode is not enough on its own: the literal path only rewrites
+        crossComponentResources, so without this the injected Resource Graph
+        parameter stays in the workbook, keeps its isGlobal flag, and keeps being
+        evaluated on every load. A viewer without subscription-scope read then
+        goes on getting HTTP 502 about the authorization header even though the
+        run reported success, which is precisely the state that made a customer
+        think the fix had not worked.
+
+        Safe to call on a workbook that was never self-healed; it reports zero.
+    .OUTPUTS
+        PSCustomObject: Removed (bool), ParameterName, ReferencesCleared (int).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Root)
+
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    # The manifest is the reliable record, but a portal re-save can drop it, so
+    # fall back to reading the parameter item itself.
+    $manifest = Get-DualScopeManifest -Root $Root
+    if ($manifest -and $manifest.Contains('scopeParameterName') -and $manifest['scopeParameterName']) {
+        [void]$names.Add("{$([string]$manifest['scopeParameterName'])}")
+    }
+
+    $index = Get-ScopeParameterItemIndex -Root $Root
+    if ($index -ge 0) {
+        $items = @(ConvertTo-SafeArray $Root['items'])
+        foreach ($p in @(ConvertTo-SafeArray $items[$index]['content']['parameters'])) {
+            $n = [string]$p['name']
+            if ($n) { [void]$names.Add("{$n}") }
+        }
+    }
+
+    if ($names.Count -eq 0) {
+        return [PSCustomObject]@{ Removed = $false; ParameterName = $null; ReferencesCleared = 0 }
+    }
+
+    $cleared = 0
+    foreach ($entry in @(Get-WorkbookNode -Root $Root)) {
+        if ($entry.Node -isnot [System.Collections.IDictionary]) { continue }
+        if (-not $entry.Node.Contains('crossComponentResources')) { continue }
+        $values = @(ConvertTo-SafeArray $entry.Node['crossComponentResources'] | ForEach-Object { [string]$_ })
+        $kept = @($values | Where-Object { -not $names.Contains($_) })
+        if ($kept.Count -eq $values.Count) { continue }
+
+        if ($kept.Count -eq 0) { $entry.Node.Remove('crossComponentResources') }
+        else { $entry.Node['crossComponentResources'] = $kept }
+        $cleared++
+    }
+
+    # Removed last: taking the item out shifts every items[] index, which would
+    # invalidate paths the walk above was matching against.
+    $removed = Remove-ScopeParameter -Root $Root
+
+    $displayName = $null
+    foreach ($n in $names) { $displayName = $n.Trim('{', '}'); break }
+
+    return [PSCustomObject]@{
+        Removed           = $removed
+        ParameterName     = $displayName
+        ReferencesCleared = $cleared
+    }
+}
+
 # ── Apply ─────────────────────────────────────────────────────────────────────
 function Set-WorkbookDualScope {
     <#
@@ -574,6 +644,21 @@ function Set-WorkbookDualScope {
 
     $changes = [System.Collections.Generic.List[object]]::new()
     $stats = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
+
+    # Coming from self-healing, the injected Resource Graph parameter has to go
+    # before anything else. Rewriting scope lists around it would leave it in
+    # place, still global, still queried on every workbook load - so the 502 it
+    # causes for a viewer without subscription-scope read would survive a run
+    # that reported success.
+    $cleanup = Remove-SelfHealingArtifact -Root $Root
+    if ($cleanup.Removed -or $cleanup.ReferencesCleared -gt 0) {
+        $changes.Add([ordered]@{
+                path              = '$'
+                op                = 'removed-scope-parameter'
+                parameter         = $cleanup.ParameterName
+                referencesCleared = $cleanup.ReferencesCleared
+            })
+    }
 
     # One walk, materialised, because the parameter patch needs a name lookup
     # that spans the whole tree and the query pass must not re-walk a mutating
@@ -1181,6 +1266,7 @@ Export-ModuleMember -Function @(
     'New-DualScopeManifest'
     'Set-WorkbookDualScope'
     'Set-WorkbookSelfHealingScope'
+    'Remove-SelfHealingArtifact'
     'Set-ParameterDualScope'
     'Restore-WorkbookScope'
     'Restore-FromManifest'

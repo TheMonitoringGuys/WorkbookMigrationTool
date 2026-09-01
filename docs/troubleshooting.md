@@ -21,16 +21,24 @@ This only affects workbooks scoped with `-ScopeMode SelfHealing`. Literal mode i
 no Resource Graph query at all, which is why the Sentinel Migration Assistant never
 produced this error.
 
-**Fix:** Re-scope the affected workbooks in literal mode, which is the default:
+**Fix:** Re-run in literal mode, which is the default. A single run is enough: it
+removes the injected parameter, clears every reference to it, and re-scopes with
+literal resource IDs.
 
 ```powershell
-./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -DryRun
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute
 ```
 
-The revert removes the injected parameter; the second run re-scopes using literal
-resource IDs. Remember that literal scope must be reverted before the source
-workspace is decommissioned.
+**Upgrading alone is not enough.** Versions 1.1.0 and 1.2.0 changed the default but
+left the injected parameter in the workbook when re-scoping, so the run reported
+success while the 502 carried on. Use 1.2.1 or later.
+
+To confirm a workbook is clean, open it in the portal, choose Edit then Advanced
+Editor, and search for `WBScopeSource`. A repaired workbook has no match.
+
+Remember that literal scope must be reverted before the source workspace is
+decommissioned.
 
 To keep self-healing, grant every viewer **Reader on the source subscription** (not
 just the workspace) and confirm with `-ValidateQueries`, which resolves the parameter
@@ -259,3 +267,4 @@ $result.Results | Format-Table DisplayName, Action, Eligible, Added, Replaced, P
 $run = Get-ChildItem ./output -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Get-ChildItem (Join-Path $run.FullName 'snapshots')
 ```
+

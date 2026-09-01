@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.1] - 2026-09-01
+
+### Fixed
+
+- Re-scoping a self-healed workbook in literal mode now removes the injected
+  Resource Graph parameter and every reference to it.
+
+  1.2.0 changed the default to literal but only rewrote the scope lists. The
+  injected parameter stayed in the workbook, kept its `isGlobal` flag, and went on
+  being evaluated on every load - so a viewer without subscription-scope read kept
+  getting HTTP 502 about the authorization header from a run that reported success.
+  The customer who reported the original 502 upgraded, re-ran, and saw no change.
+
+  A single `-Execute` in the default mode now repairs an affected workbook. No
+  separate revert step is needed first.
+
+  Cleanup falls back to reading the parameter item itself when the `$dualScope`
+  manifest has been lost to a portal re-save, and is a no-op on workbooks that were
+  never self-healed.
+
 ## [1.2.0] - 2026-09-01
 
 ### Changed
