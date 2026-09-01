@@ -1,0 +1,495 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="210" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-09-01" time="15:39:18">
+  <environment platform="Microsoft Windows 11 Pro|C:\Windows|\Device\Harddisk0\Partition3" user-domain="REDMOND" machine-name="BLTAYLOULT" clr-version="10.0.11" user="bltaylou" nunit-version="2.5.8.0" cwd="C:\Repos\Workbook Migration Tool" os-version="10.0.26200" />
+  <culture-info current-culture="en-US" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="98.5959" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Api.Tests.ps1" executed="True" result="Success" success="True" time="2.1783" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Api.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="API versions" executed="True" result="Success" success="True" time="0.1761" asserts="0" description="API versions">
+            <results>
+              <test-case description="returns documented versions for known resources" name="API versions.returns documented versions for known resources" time="0.1081" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="throws for an unknown resource name" name="API versions.throws for an unknown resource name" time="0.0293" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Workspace URI builders" executed="True" result="Success" success="True" time="0.2032" asserts="0" description="Workspace URI builders">
+            <results>
+              <test-case description="builds the bare workspace resource ID used by workbook scope fields" name="Workspace URI builders.builds the bare workspace resource ID used by workbook scope fields" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="prefixes the ARM endpoint for a callable workspace URI" name="Workspace URI builders.prefixes the ARM endpoint for a callable workspace URI" time="0.0085" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="appends the workspace API version" name="Workspace URI builders.appends the workspace API version" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Workbook and query URI builders" executed="True" result="Success" success="True" time="0.2315" asserts="0" description="Workbook and query URI builders">
+            <results>
+              <test-case description="builds the Sentinel workbook list URI and URL-encodes sourceId" name="Workbook and query URI builders.builds the Sentinel workbook list URI and URL-encodes sourceId" time="0.0117" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="builds a workbook item URI" name="Workbook and query URI builders.builds a workbook item URI" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="builds a Log Analytics query URI" name="Workbook and query URI builders.builds a Log Analytics query URI" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="API defaults" executed="True" result="Success" success="True" time="0.2551" asserts="0" description="API defaults">
+            <results>
+              <test-case description="round-trips retry count and ignores negative values" name="API defaults.round-trips retry count and ignores negative values" time="0.0193" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Access token validation" executed="True" result="Success" success="True" time="0.4416" asserts="0" description="Access token validation">
+            <results>
+              <test-case description="accepts a well-formed bearer token" name="Access token validation.accepts a well-formed bearer token" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an empty token and points at the expired session" name="Access token validation.rejects an empty token and points at the expired session" time="0.0274" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names device auth in the reconnect advice" name="Access token validation.names device auth in the reconnect advice" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an unconverted SecureString" name="Access token validation.rejects an unconverted SecureString" time="0.0918" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a token containing whitespace and names multiple contexts" name="Access token validation.rejects a token containing whitespace and names multiple contexts" time="0.0194" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a value that is not a JWT without echoing the whole value" name="Access token validation.rejects a value that is not a JWT without echoing the whole value" time="0.0076" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="truncates the preview so a token is never written out in full" name="Access token validation.truncates the preview so a token is never written out in full" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Common.Tests.ps1" executed="True" result="Success" success="True" time="0.3545" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Common.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Array normalization" executed="True" result="Success" success="True" time="0.0527" asserts="0" description="Array normalization">
+            <results>
+              <test-case description="turns null into an empty safe array" name="Array normalization.turns null into an empty safe array" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="turns a scalar into a one-item safe array" name="Array normalization.turns a scalar into a one-item safe array" time="0.0118" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="drops null entries from a safe array" name="Array normalization.drops null entries from a safe array" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="turns null into an empty item list" name="Array normalization.turns null into an empty item list" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="turns a scalar into a one-item list" name="Array normalization.turns a scalar into a one-item list" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="drops null entries from an item list" name="Array normalization.drops null entries from an item list" time="0.0183" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Action display" executed="True" result="Success" success="True" time="0.1132" asserts="0" description="Action display">
+            <results>
+              <test-case description="normalizes dry-run actions and handles null" name="Action display.normalizes dry-run actions and handles null" time="0.01" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="formats dry-run and executed scope labels" name="Action display.formats dry-run and executed scope labels" time="0.011" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never returns the raw action as the label" name="Action display.never returns the raw action as the label" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns exactly one console color name for each action" name="Action display.returns exactly one console color name for each action" time="0.0328" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Duration formatting" executed="True" result="Success" success="True" time="0.1318" asserts="0" description="Duration formatting">
+            <results>
+              <test-case description="shows days for a run longer than 24 hours" name="Duration formatting.shows days for a run longer than 24 hours" time="0.0069" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns N/A for non-TimeSpan input" name="Duration formatting.returns N/A for non-TimeSpan input" time="0.0035" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not round 90 minutes up to two hours" name="Duration formatting.does not round 90 minutes up to two hours" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="API error formatting" executed="True" result="Success" success="True" time="0.2623" asserts="0" description="API error formatting">
+            <results>
+              <test-case description="extracts code and message from an ARM error body" name="API error formatting.extracts code and message from an ARM error body" time="0.0204" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts code and message from a double-nested ARM error body" name="API error formatting.extracts code and message from a double-nested ARM error body" time="0.0047" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the exception message for non-JSON errors" name="API error formatting.falls back to the exception message for non-JSON errors" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="truncates long details at the requested payload length" name="API error formatting.truncates long details at the requested payload length" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns the status code when the response has one" name="API error formatting.returns the status code when the response has one" time="0.0808" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns null when the error has no response" name="API error formatting.returns null when the error has no response" time="0.0127" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Safe collection invocation" executed="True" result="Success" success="True" time="0.2921" asserts="0" description="Safe collection invocation">
+            <results>
+              <test-case description="returns scriptblock results as an array on success" name="Safe collection invocation.returns scriptblock results as an array on success" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns an empty array and records one structured failure on error" name="Safe collection invocation.returns an empty array and records one structured failure on error" time="0.0167" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Config.Tests.ps1" executed="True" result="Success" success="True" time="0.3401" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Config.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Config format detection" executed="True" result="Success" success="True" time="0.0204" asserts="0" description="Config format detection">
+            <results>
+              <test-case description="treats a .json extension as JSON" name="Config format detection.treats a .json extension as JSON" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="sniffs a JSON document saved with a .yml extension" name="Config format detection.sniffs a JSON document saved with a .yml extension" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats real YAML as YAML" name="Config format detection.treats real YAML as YAML" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Reading configuration" executed="True" result="Success" success="True" time="0.1081" asserts="0" description="Reading configuration">
+            <results>
+              <test-case description="loads a JSON config without any third-party module" name="Reading configuration.loads a JSON config without any third-party module" time="0.0262" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts 'target' as an alias for 'destination'" name="Reading configuration.accepts 'target' as an alias for 'destination'" time="0.0262" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="defaults to a dry run" name="Reading configuration.defaults to a dry run" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports a missing file clearly" name="Reading configuration.reports a missing file clearly" time="0.0047" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports an empty file clearly" name="Reading configuration.reports an empty file clearly" time="0.0078" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports malformed JSON clearly" name="Reading configuration.reports malformed JSON clearly" time="0.0091" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Merging parameter overrides" executed="True" result="Success" success="True" time="0.1425" asserts="0" description="Merging parameter overrides">
+            <results>
+              <test-case description="applies a supplied override" name="Merging parameter overrides.applies a supplied override" time="0.0164" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ignores an empty string rather than blanking a configured value" name="Merging parameter overrides.ignores an empty string rather than blanking a configured value" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ignores a null override" name="Merging parameter overrides.ignores a null override" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still applies a $false switch, which is meaningful" name="Merging parameter overrides.still applies a $false switch, which is meaningful" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Validating configuration" executed="True" result="Success" success="True" time="0.1882" asserts="0" description="Validating configuration">
+            <results>
+              <test-case description="accepts a complete configuration" name="Validating configuration.accepts a complete configuration" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names every missing required field at once" name="Validating configuration.names every missing required field at once" time="0.0054" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects scoping a workspace to itself" name="Validating configuration.rejects scoping a workspace to itself" time="0.0067" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an out-of-range retryCount and throttleMs" name="Validating configuration.rejects an out-of-range retryCount and throttleMs" time="0.0089" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an unknown cloud" name="Validating configuration.rejects an unknown cloud" time="0.0051" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an unknown scope mode" name="Validating configuration.rejects an unknown scope mode" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope mode" executed="True" result="Success" success="True" time="0.2284" asserts="0" description="Scope mode">
+            <results>
+              <test-case description="defaults to Literal" name="Scope mode.defaults to Literal" time="0.0038" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads scopeMode from the config file" name="Scope mode.reads scopeMode from the config file" time="0.0216" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts a command-line override" name="Scope mode.accepts a command-line override" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts both valid modes" name="Scope mode.accepts both valid modes" time="0.0049" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Reading values from either parser shape" executed="True" result="Success" success="True" time="0.2442" asserts="0" description="Reading values from either parser shape">
+            <results>
+              <test-case description="reads from a PSCustomObject, as ConvertFrom-Json produces" name="Reading values from either parser shape.reads from a PSCustomObject, as ConvertFrom-Json produces" time="0.0034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reads from a hashtable, as ConvertFrom-Yaml produces" name="Reading values from either parser shape.reads from a hashtable, as ConvertFrom-Yaml produces" time="0.0055" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns null for an absent key or a null node" name="Reading values from either parser shape.returns null for an absent key or a null node" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Discovery.Tests.ps1" executed="True" result="Success" success="True" time="0.3675" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Discovery.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Migration tag detection" executed="True" result="Success" success="True" time="0.0248" asserts="0" description="Migration tag detection">
+            <results>
+              <test-case description="is true when a hashtable contains a non-empty migration tag" name="Migration tag detection.is true when a hashtable contains a non-empty migration tag" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is true when a PSCustomObject contains a non-empty migration tag" name="Migration tag detection.is true when a PSCustomObject contains a non-empty migration tag" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is false when tags are null, empty, or the migration tag is blank" name="Migration tag detection.is false when tags are null, empty, or the migration tag is blank" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Workbook display name" executed="True" result="Success" success="True" time="0.0426" asserts="0" description="Workbook display name">
+            <results>
+              <test-case description="prefers properties.displayName" name="Workbook display name.prefers properties.displayName" time="0.0047" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the hidden-title tag" name="Workbook display name.falls back to the hidden-title tag" time="0.0027" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to resource name and then a placeholder" name="Workbook display name.falls back to resource name and then a placeholder" time="0.0073" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope tags" executed="True" result="Success" success="True" time="0.0703" asserts="0" description="Scope tags">
+            <results>
+              <test-case description="preserves existing hashtable tags while adding scope tags" name="Scope tags.preserves existing hashtable tags while adding scope tags" time="0.0142" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves existing PSCustomObject tags while adding scope tags" name="Scope tags.preserves existing PSCustomObject tags while adding scope tags" time="0.0044" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="removes only this tool's tags on revert" name="Scope tags.removes only this tool's tags on revert" time="0.0056" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Destination workbook filtering" executed="True" result="Success" success="True" time="0.2839" asserts="0" description="Destination workbook filtering">
+            <results>
+              <test-case description="returns only tagged workbooks by default" name="Destination workbook filtering.returns only tagged workbooks by default" time="0.1839" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns all workbooks when explicitly widened" name="Destination workbook filtering.returns all workbooks when explicitly widened" time="0.0134" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="matches display names case-insensitively with wildcards" name="Destination workbook filtering.matches display names case-insensitively with wildcards" time="0.0111" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Engine.Tests.ps1" executed="True" result="Success" success="True" time="34.5684" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Engine.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Serialisation round-trip" executed="True" result="Success" success="True" time="0.3665" asserts="0" description="Serialisation round-trip">
+            <results>
+              <test-case description="parses and re-serialises every corpus workbook without loss" name="Serialisation round-trip.parses and re-serialises every corpus workbook without loss" time="0.3578" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects empty serializedData rather than producing an empty workbook" name="Serialisation round-trip.rejects empty serializedData rather than producing an empty workbook" time="0.005" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Query classification" executed="True" result="Success" success="True" time="0.3928" asserts="0" description="Query classification">
+            <results>
+              <test-case description="treats a Log Analytics query as eligible" name="Query classification.treats a Log Analytics query as eligible" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an absent resourceType as Log Analytics" name="Query classification.treats an absent resourceType as Log Analytics" time="0.0022" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="excludes Azure Resource Graph queries" name="Query classification.excludes Azure Resource Graph queries" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="excludes Application Insights, which shares queryType 0" name="Query classification.excludes Application Insights, which shares queryType 0" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="excludes a node with no query, and one with an empty query" name="Query classification.excludes a node with no query, and one with an empty query" time="0.0027" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="classifies scope references" name="Query classification.classifies scope references" time="0.0072" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="extracts the referenced parameter name" name="Query classification.extracts the referenced parameter name" time="0.0036" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope list construction" executed="True" result="Success" success="True" time="0.421" asserts="0" description="Scope list construction">
+            <results>
+              <test-case description="puts the destination first so it stays the primary context" name="Scope list construction.puts the destination first so it stays the primary context" time="0.01" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="de-duplicates case-insensitively" name="Scope list construction.de-duplicates case-insensitively" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves an unrelated third workspace already in the list" name="Scope list construction.preserves an unrelated third workspace already in the list" time="0.0084" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="drops parameter and literal tokens rather than carrying them through" name="Scope list construction.drops parameter and literal tokens rather than carrying them through" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Applying dual scope to the real corpus" executed="True" result="Success" success="True" time="17.453" asserts="0" description="Applying dual scope to the real corpus">
+            <results>
+              <test-case description="exercises a corpus large enough to be meaningful" name="Applying dual scope to the real corpus.exercises a corpus large enough to be meaningful" time="0.0147" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves every eligible query reading both workspaces" name="Applying dual scope to the real corpus.leaves every eligible query reading both workspaces" time="12.3154" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never adds the source workspace to an ineligible query" name="Applying dual scope to the real corpus.never adds the source workspace to an ineligible query" time="0.408" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never modifies any KQL" name="Applying dual scope to the real corpus.never modifies any KQL" time="1.0115" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes a manifest recording both workspaces" name="Applying dual scope to the real corpus.writes a manifest recording both workspaces" time="0.02" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is idempotent - a second apply changes nothing" name="Applying dual scope to the real corpus.is idempotent - a second apply changes nothing" time="0.2645" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="produces a manifest that survives a JSON round-trip" name="Applying dual scope to the real corpus.produces a manifest that survives a JSON round-trip" time="0.2716" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports literal parameter rewrites separately from picker-preserving scope" name="Applying dual scope to the real corpus.reports literal parameter rewrites separately from picker-preserving scope" time="0.0517" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Reverting" executed="True" result="Success" success="True" time="21.1241" asserts="0" description="Reverting">
+            <results>
+              <test-case description="restores every corpus workbook byte-for-byte via the manifest" name="Reverting.restores every corpus workbook byte-for-byte via the manifest" time="1.4276" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="restores byte-for-byte after a save and reload, which is the real revert path" name="Reverting.restores byte-for-byte after a save and reload, which is the real revert path" time="1.9851" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves a single-element array rather than unrolling it to a scalar" name="Reverting.preserves a single-element array rather than unrolling it to a scalar" time="0.0344" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to the heuristic when no manifest is present" name="Reverting.falls back to the heuristic when no manifest is present" time="0.196" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports NotScoped for a workbook it never touched" name="Reverting.reports NotScoped for a workbook it never touched" time="0.0203" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Cross-subscription handling" executed="True" result="Success" success="True" time="21.1511" asserts="0" description="Cross-subscription handling">
+            <results>
+              <test-case description="widens a picker scoped to a single subscription" name="Cross-subscription handling.widens a picker scoped to a single subscription" time="0.0129" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves the picker scope alone when both workspaces share a subscription" name="Cross-subscription handling.leaves the picker scope alone when both workspaces share a subscription" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Table extraction for validation" executed="True" result="Success" success="True" time="21.3132" asserts="0" description="Table extraction for validation">
+            <results>
+              <test-case description="finds table names without tripping over KQL operators" name="Table extraction for validation.finds table names without tripping over KQL operators" time="0.1597" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Self-healing scope" executed="True" result="Success" success="True" time="28.3724" asserts="0" description="Self-healing scope">
+            <results>
+              <test-case description="is not the default mode" name="Self-healing scope.is not the default mode" time="0.122" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still self-heals when explicitly requested" name="Self-healing scope.still self-heals when explicitly requested" time="0.0207" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never marks the injected parameter as required" name="Self-healing scope.never marks the injected parameter as required" time="0.5813" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="marks the injected parameter global and hidden" name="Self-healing scope.marks the injected parameter global and hidden" time="0.5494" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes no literal source reference outside the parameter query and manifest" name="Self-healing scope.writes no literal source reference outside the parameter query and manifest" time="0.2846" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves every query with a usable scope after the source workspace is deleted" name="Self-healing scope.leaves every query with a usable scope after the source workspace is deleted" time="1.1071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="never touches fallbackResourceIds" name="Self-healing scope.never touches fallbackResourceIds" time="0.1922" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves the customer workspace picker unpinned" name="Self-healing scope.leaves the customer workspace picker unpinned" time="0.0561" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports picker-preserving query scope without claiming parameter rewrites" name="Self-healing scope.reports picker-preserving query scope without claiming parameter rewrites" time="1.5983" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="is idempotent" name="Self-healing scope.is idempotent" time="0.2487" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reverts byte-for-byte through the save and reload path" name="Self-healing scope.reverts byte-for-byte through the save and reload path" time="0.7709" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reverts by heuristic when the manifest has been lost" name="Self-healing scope.reverts by heuristic when the manifest has been lost" time="0.0194" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="avoids colliding with an existing parameter of the same name" name="Self-healing scope.avoids colliding with an existing parameter of the same name" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="re-scopes a workbook that was previously scoped in literal mode" name="Self-healing scope.re-scopes a workbook that was previously scoped in literal mode" time="0.0054" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Switching a self-healed workbook back to literal" executed="True" result="Success" success="True" time="34.41" asserts="0" description="Switching a self-healed workbook back to literal">
+            <results>
+              <test-case description="removes the injected parameter and every reference to it" name="Switching a self-healed workbook back to literal.removes the injected parameter and every reference to it" time="2.7371" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves the workbook correctly scoped to both workspaces afterwards" name="Switching a self-healed workbook back to literal.leaves the workbook correctly scoped to both workspaces afterwards" time="3.286" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does nothing to a workbook that was never self-healed" name="Switching a self-healed workbook back to literal.does nothing to a workbook that was never self-healed" time="0.0028" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still cleans up when the manifest has been lost to a portal re-save" name="Switching a self-healed workbook back to literal.still cleans up when the manifest has been lost to a portal re-save" time="0.0088" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Export.Tests.ps1" executed="True" result="Success" success="True" time="2.9084" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Export.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Workbook snapshots" executed="True" result="Success" success="True" time="0.1677" asserts="0" description="Workbook snapshots">
+            <results>
+              <test-case description="creates the snapshots folder, writes serializedData verbatim, and returns the path" name="Workbook snapshots.creates the snapshots folder, writes serializedData verbatim, and returns the path" time="0.0376" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="round-trips a saved snapshot" name="Workbook snapshots.round-trips a saved snapshot" time="0.0998" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns null for an unknown snapshot id" name="Workbook snapshots.returns null for an unknown snapshot id" time="0.024" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Raw JSON export" executed="True" result="Success" success="True" time="0.2359" asserts="0" description="Raw JSON export">
+            <results>
+              <test-case description="writes under the raw folder and produces re-parseable JSON" name="Raw JSON export.writes under the raw folder and produces re-parseable JSON" time="0.0585" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope result export" executed="True" result="Success" success="True" time="2.6817" asserts="0" description="Scope result export">
+            <results>
+              <test-case description="writes an XLSX when ImportExcel is available" name="Scope result export.writes an XLSX when ImportExcel is available" time="2.1132" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="falls back to CSV when ImportExcel is unavailable" name="Scope result export.falls back to CSV when ImportExcel is unavailable" time="0.1812" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not throw for zero results, failures, or validation rows when writing CSV" name="Scope result export.does not throw for zero results, failures, or validation rows when writing CSV" time="0.1442" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Html.Tests.ps1" executed="True" result="Success" success="True" time="2.259" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Html.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="HTML decommission readiness" executed="True" result="Success" success="True" time="0.4228" asserts="0" description="HTML decommission readiness">
+            <results>
+              <test-case description="says self-healing scoped workbooks keep working without a revert" name="HTML decommission readiness.says self-healing scoped workbooks keep working without a revert" time="0.1982" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says literal scoped workbooks must be reverted and shows the command" name="HTML decommission readiness.says literal scoped workbooks must be reverted and shows the command" time="0.0534" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names failed workbooks when readiness is unknown" name="HTML decommission readiness.names failed workbooks when readiness is unknown" time="0.0514" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says a revert run is back to destination-only scope" name="HTML decommission readiness.says a revert run is back to destination-only scope" time="0.0472" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not claim readiness on an empty run" name="HTML decommission readiness.does not claim readiness on an empty run" time="0.0668" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="HTML scope mode and statistics" executed="True" result="Success" success="True" time="1.1895" asserts="0" description="HTML scope mode and statistics">
+            <results>
+              <test-case description="renders the supplied scope mode" name="HTML scope mode and statistics.renders the supplied scope mode" time="0.2328" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an older run with no ScopeMode as literal" name="HTML scope mode and statistics.treats an older run with no ScopeMode as literal" time="0.1582" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not render zero picker statistic cards" name="HTML scope mode and statistics.does not render zero picker statistic cards" time="0.1878" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="renders non-zero picker statistic cards with distinct labels" name="HTML scope mode and statistics.renders non-zero picker statistic cards with distinct labels" time="0.0482" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats a missing ScopedViaPicker field as zero" name="HTML scope mode and statistics.treats a missing ScopedViaPicker field as zero" time="0.1343" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="HTML validation findings" executed="True" result="Success" success="True" time="1.3571" asserts="0" description="HTML validation findings">
+            <results>
+              <test-case description="surfaces self-healing scope parameter failures prominently" name="HTML validation findings.surfaces self-healing scope parameter failures prominently" time="0.1654" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="HTML encoding and self-contained output" executed="True" result="Success" success="True" time="1.6169" asserts="0" description="HTML encoding and self-contained output">
+            <results>
+              <test-case description="encodes ampersands in workbook names" name="HTML encoding and self-contained output.encodes ampersands in workbook names" time="0.0535" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="encodes markup and quotes in workbook names" name="HTML encoding and self-contained output.encodes markup and quotes in workbook names" time="0.148" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not reference external HTTP assets or scripts" name="HTML encoding and self-contained output.does not reference external HTTP assets or scripts" time="0.0561" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="HTML renderer robustness" executed="True" result="Success" success="True" time="2.14" asserts="0" description="HTML renderer robustness">
+            <results>
+              <test-case description="does not throw on sparse or broken diagnostic input" name="HTML renderer robustness.does not throw on sparse or broken diagnostic input" time="0.4694" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves no unexpanded PowerShell variables in customer-facing text" name="HTML renderer robustness.leaves no unexpanded PowerShell variables in customer-facing text" time="0.0515" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\ModuleLoadOrder.Tests.ps1" executed="True" result="Success" success="True" time="3.9886" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\ModuleLoadOrder.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Orchestrator module load order" executed="True" result="Success" success="True" time="1.5183" asserts="0" description="Orchestrator module load order">
+            <results>
+              <test-case description="parses a non-trivial import sequence out of the script" name="Orchestrator module load order.parses a non-trivial import sequence out of the script" time="0.0272" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="discovers the exported function surface" name="Orchestrator module load order.discovers the exported function surface" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves every exported function callable after the full import sequence" name="Orchestrator module load order.leaves every exported function callable after the full import sequence" time="1.483" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ends with the base modules, shallowest last" name="Orchestrator module load order.ends with the base modules, shallowest last" time="0.0027" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Orchestrator.Smoke.Tests.ps1" executed="True" result="Success" success="True" time="50.1161" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Orchestrator.Smoke.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Orchestrator entry point" executed="True" result="Success" success="True" time="0.0178" asserts="0" description="Orchestrator entry point">
+            <results>
+              <test-case description="parses without syntax errors" name="Orchestrator entry point.parses without syntax errors" time="0.0042" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="makes -Execute a switch, so omitting it cannot silently enable writes" name="Orchestrator entry point.makes -Execute a switch, so omitting it cannot silently enable writes" time="0.0116" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Dry run" executed="True" result="Success" success="True" time="6.9789" asserts="0" description="Dry run">
+            <results>
+              <test-case description="exits zero" name="Dry run.exits zero" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes nothing to Azure" name="Dry run.writes nothing to Azure" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still produces the reports a customer reviews" name="Dry run.still produces the reports a customer reviews" time="0.0031" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="snapshots every workbook before touching anything" name="Dry run.snapshots every workbook before touching anything" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says plainly that nothing was changed" name="Dry run.says plainly that nothing was changed" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Execute" executed="True" result="Success" success="True" time="13.7806" asserts="0" description="Execute">
+            <results>
+              <test-case description="exits zero" name="Execute.exits zero" time="0.0021" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes every workbook exactly once" name="Execute.writes every workbook exactly once" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="writes only to the destination resource group" name="Execute.writes only to the destination resource group" time="0.0113" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="produces the full artifact set" name="Execute.produces the full artifact set" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="HTML-encodes a customer workbook name containing an ampersand" name="Execute.HTML-encodes a customer workbook name containing an ampersand" time="0.0032" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves no unexpanded PowerShell variable in the customer-facing reports" name="Execute.leaves no unexpanded PowerShell variable in the customer-facing reports" time="0.0068" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names both workspaces in the permissions next step" name="Execute.names both workspaces in the permissions next step" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Failure handling" executed="True" result="Success" success="True" time="20.4984" asserts="0" description="Failure handling">
+            <results>
+              <test-case description="exits 2 when source and destination are the same workspace" name="Failure handling.exits 2 when source and destination are the same workspace" time="1.5841" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="exits 2 on an out-of-range parameter rather than looking like success" name="Failure handling.exits 2 on an out-of-range parameter rather than looking like success" time="1.433" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="handles a destination with no matching workbooks without failing" name="Failure handling.handles a destination with no matching workbooks without failing" time="3.6942" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Revert" executed="True" result="Success" success="True" time="33.8973" asserts="0" description="Revert">
+            <results>
+              <test-case description="restores destination-only scope and exits zero" name="Revert.restores destination-only scope and exits zero" time="5.5391" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="proceeds with preflight ON when the source workspace has been deleted" name="Revert.proceeds with preflight ON when the source workspace has been deleted" time="6.0294" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still refuses to apply scope when the source workspace has been deleted" name="Revert.still refuses to apply scope when the source workspace has been deleted" time="1.8283" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope mode" executed="True" result="Success" success="True" time="49.9657" asserts="0" description="Scope mode">
+            <results>
+              <test-case description="defaults to literal and says so" name="Scope mode.defaults to literal and says so" time="7.1322" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="honours -ScopeMode SelfHealing when asked for it" name="Scope mode.honours -ScopeMode SelfHealing when asked for it" time="7.7008" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an unknown scope mode at bind time" name="Scope mode.rejects an unknown scope mode at bind time" time="1.2335" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Preflight.Tests.ps1" executed="True" result="Success" success="True" time="0.3266" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Preflight.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Prerequisite assertion" executed="True" result="Success" success="True" time="0.0766" asserts="0" description="Prerequisite assertion">
+            <results>
+              <test-case description="is silent when prerequisites are present" name="Prerequisite assertion.is silent when prerequisites are present" time="0.0736" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Workspace reachability" executed="True" result="Success" success="True" time="0.1407" asserts="0" description="Workspace reachability">
+            <results>
+              <test-case description="populates reachability details on success" name="Workspace reachability.populates reachability details on success" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns a distinct human-readable access denied message for 403" name="Workspace reachability.returns a distinct human-readable access denied message for 403" time="0.0271" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns a distinct human-readable not found message for 404" name="Workspace reachability.returns a distinct human-readable not found message for 404" time="0.0096" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Preflight result" executed="True" result="Success" success="True" time="0.2034" asserts="0" description="Preflight result">
+            <results>
+              <test-case description="sets cross-subscription and cross-region warnings without failing" name="Preflight result.sets cross-subscription and cross-region warnings without failing" time="0.0414" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="emits the Log Analytics Reader warning on every run" name="Preflight result.emits the Log Analytics Reader warning on every run" time="0.0189" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Preflight in revert mode" executed="True" result="Success" success="True" time="0.2522" asserts="0" description="Preflight in revert mode">
+            <results>
+              <test-case description="lets a revert proceed when the source workspace has been deleted" name="Preflight in revert mode.lets a revert proceed when the source workspace has been deleted" time="0.0197" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still refuses to apply scope when the source workspace has been deleted" name="Preflight in revert mode.still refuses to apply scope when the source workspace has been deleted" time="0.0107" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="still blocks when the destination is unreachable, even reverting" name="Preflight in revert mode.still blocks when the destination is unreachable, even reverting" time="0.0156" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Report.Tests.ps1" executed="True" result="Success" success="True" time="0.7144" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Report.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Markdown decommission readiness" executed="True" result="Success" success="True" time="0.2244" asserts="0" description="Markdown decommission readiness">
+            <results>
+              <test-case description="says self-healing scoped workbooks keep working without a revert" name="Markdown decommission readiness.says self-healing scoped workbooks keep working without a revert" time="0.0747" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says literal scoped workbooks must be reverted and shows the command" name="Markdown decommission readiness.says literal scoped workbooks must be reverted and shows the command" time="0.0467" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="names failed workbooks when readiness is unknown" name="Markdown decommission readiness.names failed workbooks when readiness is unknown" time="0.0402" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="says a revert run is back to destination-only scope" name="Markdown decommission readiness.says a revert run is back to destination-only scope" time="0.0368" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not claim readiness on an empty run" name="Markdown decommission readiness.does not claim readiness on an empty run" time="0.0239" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Markdown scope mode and statistics" executed="True" result="Success" success="True" time="0.3544" asserts="0" description="Markdown scope mode and statistics">
+            <results>
+              <test-case description="renders the supplied scope mode" name="Markdown scope mode and statistics.renders the supplied scope mode" time="0.0255" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats an older run with no ScopeMode as literal" name="Markdown scope mode and statistics.treats an older run with no ScopeMode as literal" time="0.0185" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not put zero picker statistics in the KPI summary" name="Markdown scope mode and statistics.does not put zero picker statistics in the KPI summary" time="0.0278" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="puts non-zero picker statistics in the KPI summary with distinct labels" name="Markdown scope mode and statistics.puts non-zero picker statistics in the KPI summary with distinct labels" time="0.0296" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats a missing ScopedViaPicker field as zero" name="Markdown scope mode and statistics.treats a missing ScopedViaPicker field as zero" time="0.0259" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Markdown validation findings" executed="True" result="Success" success="True" time="0.3834" asserts="0" description="Markdown validation findings">
+            <results>
+              <test-case description="surfaces self-healing scope parameter failures prominently" name="Markdown validation findings.surfaces self-healing scope parameter failures prominently" time="0.0271" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Markdown renderer robustness" executed="True" result="Success" success="True" time="0.5115" asserts="0" description="Markdown renderer robustness">
+            <results>
+              <test-case description="does not throw on sparse or broken diagnostic input" name="Markdown renderer robustness.does not throw on sparse or broken diagnostic input" time="0.11" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves no unexpanded PowerShell variables in customer-facing text" name="Markdown renderer robustness.leaves no unexpanded PowerShell variables in customer-facing text" time="0.0138" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Repos\Workbook Migration Tool\tests\Validate.Tests.ps1" executed="True" result="Success" success="True" time="0.474" asserts="0" description="C:\Repos\Workbook Migration Tool\tests\Validate.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Workspace query invocation" executed="True" result="Success" success="True" time="0.0566" asserts="0" description="Workspace query invocation">
+            <results>
+              <test-case description="returns the first table rows on a normal response" name="Workspace query invocation.returns the first table rows on a normal response" time="0.019" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns a finding-shaped failure when the call throws" name="Workspace query invocation.returns a finding-shaped failure when the call throws" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adds workspaces to the request body only when additional workspaces are supplied" name="Workspace query invocation.adds workspaces to the request body only when additional workspaces are supplied" time="0.0283" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Workspace table inventory" executed="True" result="Success" success="True" time="0.0853" asserts="0" description="Workspace table inventory">
+            <results>
+              <test-case description="extracts table names from returned rows" name="Workspace table inventory.extracts table names from returned rows" time="0.0194" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports inventory failure instead of making the workspace look empty" name="Workspace table inventory.reports inventory failure instead of making the workspace look empty" time="0.0075" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Cross-workspace access probe" executed="True" result="Success" success="True" time="0.1079" asserts="0" description="Cross-workspace access probe">
+            <results>
+              <test-case description="succeeds when the probe query returns" name="Cross-workspace access probe.succeeds when the probe query returns" time="0.0086" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="adds a viewer-facing Log Analytics Reader hint on permission-shaped failures" name="Cross-workspace access probe.adds a viewer-facing Log Analytics Reader hint on permission-shaped failures" time="0.012" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Self-healing scope parameter probe" executed="True" result="Success" success="True" time="0.1556" asserts="0" description="Self-healing scope parameter probe">
+            <results>
+              <test-case description="resolves when Resource Graph returns the source workspace" name="Self-healing scope parameter probe.resolves when Resource Graph returns the source workspace" time="0.0165" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reports the silent destination-only degradation when Resource Graph returns nothing" name="Self-healing scope parameter probe.reports the silent destination-only degradation when Resource Graph returns nothing" time="0.0162" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="skips rather than reporting a false negative when no subscription id is available" name="Self-healing scope parameter probe.skips rather than reporting a false negative when no subscription id is available" time="0.0025" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns a validation finding when the Resource Graph call throws" name="Self-healing scope parameter probe.returns a validation finding when the Resource Graph call throws" time="0.0106" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Scope validation result" executed="True" result="Success" success="True" time="0.355" asserts="0" description="Scope validation result">
+            <results>
+              <test-case description="populates the self-healing scope parameter status" name="Scope validation result.populates the self-healing scope parameter status" time="0.12" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not run the scope parameter probe in literal mode" name="Scope validation result.does not run the scope parameter probe in literal mode" time="0.0201" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="computes table differences case-insensitively" name="Scope validation result.computes table differences case-insensitively" time="0.0208" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="leaves table differences empty when either inventory failed" name="Scope validation result.leaves table differences empty when either inventory failed" time="0.0142" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="returns the complete result shape for zero workbooks" name="Scope validation result.returns the complete result shape for zero workbooks" time="0.0215" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

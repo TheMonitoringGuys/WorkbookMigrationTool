@@ -5,6 +5,52 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.6] - 2026-09-01
+
+### Fixed
+
+- **A partial run no longer reports success.** When the per-workbook fallback could not
+  read a workbook, it warned and dropped it. The orchestrator never learned, so a run that
+  processed eleven of sixteen workbooks printed `Failed: 0`, wrote a report describing an
+  eleven-workbook run, and exited 0 - while five workbooks quietly went on showing
+  destination data only.
+
+  That is the same symptom the previous release set out to remove, arriving through a
+  different door, and a false success is worse here than an outright failure.
+  `Get-DestinationWorkbook` now returns the unreadable workbook IDs to its caller, which
+  records each as a failure so they reach the summary, the reports and the exit code.
+
+- **The count an operator reconciles against is honest again.** `$total` was taken after
+  the unreadable workbooks had been removed, so a destination with sixteen workbooks and
+  five failures reported `from 11 bound to the destination workspace`. Both numbers were
+  internally consistent and both were wrong, defeating the one check - comparing against
+  the portal - that would have exposed the problem. It now counts what is bound.
+
+- **An empty destination is no longer a hard failure.** If the bulk listing failed but the
+  lightweight one legitimately returned no workbooks, the run threw "every individual
+  fetch failed too" when none had been attempted, sending the operator after a permissions
+  problem that did not exist. The failure is now conditional on there having been failures.
+
+- **`Test-WorkbookScope.ps1` survives an unreadable workbook.** The content parse sat
+  outside any `try`, and it throws on empty, whitespace or malformed input. A single
+  workbook with no content - which the portal will happily create - ended the audit
+  part-way through its table and produced no conclusions at all, precisely when it was
+  being relied on. Such workbooks are now reported as `UNREADABLE` and the audit continues.
+
+- **`Test-WorkbookScope.ps1` always explains itself.** A workbook that carried the
+  migration tag but had not been scoped yet matched none of the reporting branches, so the
+  most ordinary case of all - migrated workbooks, tool not yet run - printed a table, a
+  horizontal rule, and nothing else before exiting non-zero. That case now has its own
+  branch, and the branches are exhaustive.
+
+- **`Test-WorkbookScope.ps1` no longer denies what it just observed.** If every workbook
+  failed to read, it reported "No workbooks found bound to that workspace" - the opposite
+  of the truth, since the listing had returned them.
+
+- **`Test-ScopeConnection.ps1` no longer crashes on the condition it just diagnosed.** When
+  `Get-AzAccessToken` returned nothing, the script printed `Objects returned: 0` and then
+  called a method on `$null`, replacing its own diagnosis with a stack trace.
+
 ## [1.2.5] - 2026-09-01
 
 ### Added

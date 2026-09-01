@@ -194,7 +194,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:ToolVersion = '1.2.5'
+$script:ToolVersion = '1.2.6'
 
 # ── Module loading ────────────────────────────────────────────────────────────
 # Import-Module -Force removes a module before re-importing it, and every module
@@ -341,13 +341,15 @@ try {
 
     # ── Discovery ─────────────────────────────────────────────────────────────
     Write-Step 'Discovering workbooks in the destination...'
+    $unreadableIds = @()
     $workbooks = @(Get-DestinationWorkbook -ArmEndpoint $armEndpoint `
             -SubscriptionId $config.Destination.SubscriptionId `
             -ResourceGroupName $config.Destination.ResourceGroupName `
             -WorkspaceResourceId $destId `
             -WorkbookFilter $config.Options.WorkbookFilter `
             -IncludeAllWorkbooks:$config.Options.IncludeAllWorkbooks `
-            -ThrottleDelayMs $throttle)
+            -ThrottleDelayMs $throttle `
+            -UnreadableWorkbookIds ([ref]$unreadableIds))
 
     if ($workbooks.Count -eq 0) {
         Write-Host ''
@@ -385,6 +387,26 @@ try {
     }
 
     # ── Process ───────────────────────────────────────────────────────────────
+    # Workbooks that exist but could not be read are recorded as failures before
+    # anything else runs. They were dropped by discovery, so without this the run
+    # would process eleven of sixteen workbooks, report "Failed: 0", and exit 0 -
+    # while five workbooks silently kept showing destination-only data.
+    foreach ($badId in @($unreadableIds)) {
+        $results.Add([PSCustomObject]@{
+                WorkbookId = $badId; DisplayName = $badId; Action = 'Failed'; Method = $null
+                Eligible = 0; Ineligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0
+                FallbackUpdated = 0; ParameterNames = @(); SnapshotPath = $null
+                Reason = 'Could not be read from Azure, so it was never processed.'
+                Tables = @()
+            })
+        $errors.Add([PSCustomObject]@{
+                Component = "Workbook: $badId"
+                Message = 'Could not be read from Azure, so it was never scoped. It still points at the destination workspace only.'
+                Remediation = 'Re-run to retry. If it persists, check read access to this workbook, then run tools/Test-WorkbookScope.ps1 to confirm which workbooks are actually scoped.'
+                Critical = $false
+            })
+    }
+
     if ($workbooks.Count -gt 0) {
         $verb = if ($isRevert) { 'Reverting' } else { 'Scoping' }
         Write-Step "$verb $($workbooks.Count) workbook(s)..."

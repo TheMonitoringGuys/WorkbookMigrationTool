@@ -137,9 +137,22 @@ catch {
 }
 
 Write-Check 'Objects returned' $returned.Count $(if ($returned.Count -eq 1) { 'ok' } else { 'bad' })
-if ($returned.Count -ne 1) {
+if ($returned.Count -gt 1) {
     Write-Host '       Expected exactly one. More than one is what produces a header holding' -ForegroundColor Red
     Write-Host '       several tokens joined by spaces, which Azure rejects as malformed.' -ForegroundColor Red
+}
+
+# Falling through with nothing would make the next line call a method on $null,
+# and under ErrorActionPreference = Stop that replaces the diagnosis with a stack
+# trace - in the one script whose whole purpose is to avoid exactly that.
+if ($returned.Count -eq 0) {
+    Write-Host ''
+    Write-Host 'Get-AzAccessToken returned no token at all. The Azure session is not usable.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host 'Sign in again:' -ForegroundColor Yellow
+    Write-Host '   Disconnect-AzAccount' -ForegroundColor Yellow
+    Write-Host '   Connect-AzAccount -UseDeviceAuth' -ForegroundColor Yellow
+    exit 2
 }
 
 $tokenObj = $returned[0]

@@ -152,7 +152,13 @@ function Get-DestinationWorkbook {
         [Parameter(Mandatory)][string]$WorkspaceResourceId,
         [switch]$IncludeAllWorkbooks,
         [string]$WorkbookFilter,
-        [int]$ThrottleDelayMs = 100
+        [int]$ThrottleDelayMs = 100,
+        # Receives the IDs of workbooks that exist but could not be read, so the
+        # caller can record them as failures. Without this they would be dropped
+        # here, and a run that silently processed eleven of sixteen workbooks
+        # would report success and exit 0 - the precise failure this tool exists
+        # to remove, arriving through a different door.
+        [ref]$UnreadableWorkbookIds
     )
 
     $uri = Get-WorkbooksUri -ArmEndpoint $ArmEndpoint -SubscriptionId $SubscriptionId `
@@ -161,8 +167,15 @@ function Get-DestinationWorkbook {
     Write-Host "  Fetching workbooks from destination..." -ForegroundColor Cyan
 
     $workbooks = $null
+    $unreadable = [System.Collections.Generic.List[string]]::new()
+    # How many workbooks are actually bound to this workspace. Kept separate from
+    # the count that survives fetching, because reporting "from 11 bound" when
+    # sixteen exist would hide the very gap the operator needs to notice.
+    $boundTotal = 0
+
     try {
         $workbooks = @(Invoke-ScopeApiList -Uri $uri -ThrottleDelayMs $ThrottleDelayMs)
+        $boundTotal = $workbooks.Count
     }
     catch {
         # A single request asking for every workbook's content can return several
@@ -212,10 +225,10 @@ Run tools/Test-ScopeConnection.ps1 to identify which.
 "@
         }
 
+        $boundTotal = $stubs.Count
         Write-Host "  Listed $($stubs.Count) workbook(s); fetching content individually..." -ForegroundColor Yellow
 
         $hydrated = [System.Collections.Generic.List[object]]::new()
-        $failed = 0
         foreach ($stub in $stubs) {
             if (-not $stub.id) { continue }
             # The list returns full ARM resource IDs; the item URI builder wants
@@ -228,24 +241,32 @@ Run tools/Test-ScopeConnection.ps1 to identify which.
                 if ($full) { $hydrated.Add($full) }
             }
             catch {
-                # One unreadable workbook must not cost the other fifteen. It is
-                # counted and named so the run is never silently partial.
-                $failed++
+                # One unreadable workbook must not cost the other fifteen, but it
+                # must not vanish either. It goes back to the caller so the run
+                # records a failure rather than quietly shrinking its own scope.
+                $unreadable.Add([string]$wbId)
                 Write-Warning "  Could not read workbook '$wbId': $($_.Exception.Message)"
             }
         }
 
-        if ($hydrated.Count -eq 0) {
-            throw "Could not read any workbook content from the destination. The bulk listing failed and every individual fetch failed too. Original error: $bulkError"
+        # Only a genuine wall of failures justifies giving up. A destination that
+        # legitimately holds no workbooks reaches here with nothing attempted, and
+        # claiming "every individual fetch failed too" would be false and would
+        # send someone hunting a permissions problem that does not exist.
+        if ($hydrated.Count -eq 0 -and $unreadable.Count -gt 0) {
+            throw "Could not read any workbook content from the destination. The bulk listing failed, and all $($unreadable.Count) individual fetch(es) failed too. Original error: $bulkError"
         }
-        if ($failed -gt 0) {
-            Write-Warning "  $failed workbook(s) could not be read and are excluded from this run."
+
+        if ($unreadable.Count -gt 0) {
+            Write-Warning "  $($unreadable.Count) workbook(s) could not be read. They are reported as failures, not skipped silently."
         }
 
         $workbooks = @($hydrated)
     }
 
-    $total = $workbooks.Count
+    if ($UnreadableWorkbookIds) { $UnreadableWorkbookIds.Value = @($unreadable) }
+
+    $total = $boundTotal
 
     $excludedByTag = @()
     if ($IncludeAllWorkbooks) {

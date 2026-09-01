@@ -101,6 +101,8 @@ Write-Host ("  {0,-44} {1,-8} {2,-9} {3,-12} {4}" -f 'WORKBOOK', 'MIGRATED', 'PR
 
 $rows = [System.Collections.Generic.List[object]]::new()
 
+$unreadable = 0
+
 foreach ($stub in $stubs) {
     if (-not $stub.id) { continue }
     $wbId = ($stub.id -split '/')[-1]
@@ -110,6 +112,7 @@ foreach ($stub in $stubs) {
                 -ResourceGroupName $ResourceGroupName -WorkbookId $wbId -IncludeContent)
     }
     catch {
+        $unreadable++
         Write-Warning "Could not read workbook '$wbId': $($_.Exception.Message)"
         continue
     }
@@ -117,7 +120,22 @@ foreach ($stub in $stubs) {
     $name = Get-WorkbookDisplayName -Workbook $wb
     $migrated = Test-WorkbookIsMigrated -Workbook $wb
 
-    $tree = ConvertFrom-SerializedWorkbook -Json ([string]$wb.properties.serializedData)
+    # ConvertFrom-SerializedWorkbook throws on empty, whitespace or malformed
+    # content, and a workbook with no content is ordinary - the portal will create
+    # one. Uncaught, a single such workbook would end the audit part-way through
+    # the table and produce no conclusions at all, which is precisely when this
+    # tool is being relied on.
+    try {
+        $tree = ConvertFrom-SerializedWorkbook -Json ([string]$wb.properties.serializedData)
+    }
+    catch {
+        $unreadable++
+        $short = if ($name.Length -gt 42) { $name.Substring(0, 42) } else { $name }
+        Write-Host ("  {0,-44} {1,-8} {2,-9} {3,-12} " -f $short, $(if ($migrated) { 'yes' } else { 'no' }), '-', '-') -NoNewline
+        Write-Host 'UNREADABLE' -ForegroundColor Magenta
+        continue
+    }
+
     $processed = [bool](Get-DualScopeManifest -Root $tree)
     $fallbackBoth = Test-ListHasBoth -List $tree['fallbackResourceIds']
 
@@ -192,10 +210,27 @@ Write-Host ('-' * 100) -ForegroundColor DarkGray
 $broken = @($rows | Where-Object { $_.Verdict -in @('NOT SCOPED', 'PARTIAL') })
 $untouched = @($rows | Where-Object { -not $_.Processed -and $_.Total -gt 0 })
 $skippedByTag = @($untouched | Where-Object { -not $_.Migrated })
+$taggedButUnrun = @($untouched | Where-Object { $_.Migrated })
+
+# Every read failed, yet the listing proved workbooks exist. Saying "none found"
+# here would assert the opposite of what was just observed and send someone
+# looking for a subscription or workspace mismatch that is not there.
+if ($rows.Count -eq 0 -and $unreadable -gt 0) {
+    Write-Host "All $unreadable workbook(s) bound to this workspace could not be read, so none could be assessed." -ForegroundColor Red
+    Write-Host 'They exist - the listing returned them - but fetching their content failed.' -ForegroundColor Red
+    Write-Host 'Run tools/Test-ScopeConnection.ps1 to establish why.' -ForegroundColor Yellow
+    exit 2
+}
 
 if ($rows.Count -eq 0) {
     Write-Host 'No workbooks found bound to that workspace.' -ForegroundColor Yellow
     exit 2
+}
+
+# Nothing had a query to assess, so there is nothing to certify either way.
+if (@($rows | Where-Object { $_.Total -gt 0 }).Count -eq 0) {
+    Write-Host 'None of these workbooks contain Log Analytics queries, so there is nothing to scope.' -ForegroundColor Yellow
+    exit 0
 }
 
 if ($broken.Count -eq 0 -and $untouched.Count -eq 0) {
@@ -208,7 +243,26 @@ if ($broken.Count -eq 0 -and $untouched.Count -eq 0) {
     Write-Host '    can read, so this looks like missing data rather than an error.' -ForegroundColor Green
     Write-Host '  - the time range predates ingestion stopping in the old workspace.' -ForegroundColor Green
     Write-Host '    Widen it to a window that covers before the migration.' -ForegroundColor Green
+    if ($unreadable -gt 0) {
+        Write-Host ''
+        Write-Warning "$unreadable workbook(s) could not be read and were not assessed."
+        exit 3
+    }
     exit 0
+}
+
+# The ordinary case: the Migration Assistant produced these, and the scope tool
+# has not been run over them yet. Previously this matched no branch at all and the
+# script exited non-zero having printed nothing after the table.
+if ($taggedButUnrun.Count -gt 0) {
+    Write-Host "$($taggedButUnrun.Count) migrated workbook(s) have not been scoped yet:" -ForegroundColor Yellow
+    $taggedButUnrun | Select-Object -First 10 | ForEach-Object { Write-Host "    $($_.Name)" -ForegroundColor Yellow }
+    if ($taggedButUnrun.Count -gt 10) { Write-Host "    ... and $($taggedButUnrun.Count - 10) more" -ForegroundColor Yellow }
+    Write-Host ''
+    Write-Host '  These carry the migration tag, so a normal run will pick them up:' -ForegroundColor Green
+    Write-Host '     ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -DryRun' -ForegroundColor Green
+    Write-Host '     ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute' -ForegroundColor Green
+    Write-Host ''
 }
 
 if ($skippedByTag.Count -gt 0) {
