@@ -70,7 +70,18 @@ function Get-AzEnvironment {
     param([string]`$Name)
     [PSCustomObject]@{ Name = 'AzureCloud'; ResourceManagerUrl = 'https://management.azure.com/' }
 }
-function Get-AzAccessToken { param([string]`$ResourceUrl) [PSCustomObject]@{ Token = 'stub-token' } }
+# Shaped like a real bearer token on purpose. The tool validates the token before
+# building the Authorization header, because a malformed one comes back from Azure
+# as an HTTP 502 complaining about header format rather than a clean 401. A
+# placeholder like 'stub-token' is correctly rejected by that check, so it would
+# fail every test in this file for a reason that has nothing to do with the
+# orchestrator. Keep the three base64url segments.
+function Get-AzAccessToken {
+    param([string]`$ResourceUrl)
+    [PSCustomObject]@{
+        Token = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJodHRwczovL21hbmFnZW1lbnQuYXp1cmUuY29tIn0.c21va2Utc2lnbmF0dXJl'
+    }
+}
 
 `$global:Workbooks = $workbooksJson
 

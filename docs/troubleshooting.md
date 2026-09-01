@@ -2,14 +2,83 @@
 
 ## Common issues
 
-### HTTP 502 "check the authorization header" when opening a workbook
+### HTTP 502 "check the value of Authorization header"
+
+Two unrelated problems produce this same message. **Work out which one you have before
+changing anything** - the fixes have nothing in common, and the wording of the error
+misleads in both cases.
+
+| Where you saw it | Which problem |
+|---|---|
+| The tool stopped, with a line starting `Could not complete:` | The tool could not authenticate. See below. |
+| A workbook failed to render in the Azure portal | A viewer permissions problem. See the next section. |
+
+The deciding question is whether the run finished. If the tool exited with an error,
+no workbook was touched, and the workbooks in the portal are exactly as they were.
+
+#### A. The tool fails during a run
+
+```
+Could not complete: HTTP 502 on GET https://management.azure.com/subscriptions/.../
+providers/Microsoft.Insights/workbooks?category=sentinel... - Forbidden:
+Authentication information is not given in the correct format. Check the value of
+Authorization header.
+```
+
+**This is not a permissions problem**, despite the word *Forbidden*. Azure is saying the
+`Authorization` header it received was malformed, so the request never reached the point
+of checking access. Granting roles will not help. The cause is on the machine running
+the tool: `Get-AzAccessToken` returned something that could not be used as a bearer
+token.
+
+Three causes, in rough order of likelihood:
+
+1. **The Azure session expired.** Most common with `Connect-AzAccount -UseDeviceAuth`,
+   where silent refresh is more fragile. The token comes back empty and the header is
+   the bare word `Bearer`.
+2. **More than one Azure context is loaded.** `Get-AzAccessToken` returns more than one
+   object, and the header ends up holding two tokens separated by a space.
+3. **An outdated Az.Accounts.** Az.Accounts 5.x returns the token as a `SecureString`.
+   An old or half-upgraded install can return a shape the tool cannot convert.
+
+**Diagnose it.** This reports which of the three you have, and performs the exact call
+that failed. It prints no token material and only reads:
+
+```powershell
+./tools/Test-ScopeConnection.ps1 `
+    -SubscriptionId <destination-sub> `
+    -ResourceGroupName <destination-rg> `
+    -WorkspaceName <destination-workspace>
+```
+
+**Fix, in order:**
+
+```powershell
+Disconnect-AzAccount
+Connect-AzAccount -UseDeviceAuth          # or plain Connect-AzAccount
+
+Get-AzContext -ListAvailable              # if more than one is listed:
+Set-AzContext -Subscription <destination-sub>
+
+Update-Module Az.Accounts                 # if the version is below 2.19
+```
+
+If the diagnostic reports every token check passing and Azure *still* rejects the
+header, the request is being altered in transit. That means an inspecting proxy, TLS
+interception, or a gateway stripping the header. Ask whoever runs the network whether
+`management.azure.com` is intercepted, and try from a machine outside that path.
+
+From version 1.2.2 the tool checks the token before sending it, so this now fails
+immediately with a message naming the cause instead of a 502 after three retries.
+
+#### B. A workbook fails to render in the portal
 
 **Cause:** The workbook is running an Azure Resource Graph query that the viewer is
 not allowed to make. Resource Graph runs in the *viewer's* security context, and the
 scope parameter this tool injects in `SelfHealing` mode is scoped to the source
 **subscription**. A viewer without read access at subscription scope gets a 502 whose
-message points at the authorization header, which reads like an Azure sign-in problem
-and is not one.
+message points at the authorization header, which reads like a sign-in problem and is
+not one.
 
 Log Analytics Reader granted at *workspace* scope is not sufficient. Resource Graph
 needs read at the subscription that owns the workspace.
@@ -47,7 +116,11 @@ query as the running identity and reports when it comes back empty or denied.
 ### Signing in with device code authentication
 
 Some tenants require `Connect-AzAccount -UseDeviceAuth`. That works with this tool,
-but two things are worth knowing.
+but three things are worth knowing.
+
+Device-code sessions expire less gracefully than interactive ones, and a stale session
+is the most common cause of the HTTP 502 header error above. If a run fails partway,
+sign in again before investigating anything else.
 
 A device-code session is often issued to an operator whose access was granted at
 workspace or resource-group scope rather than subscription scope. That is exactly the

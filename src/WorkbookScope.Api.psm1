@@ -107,6 +107,30 @@ function Get-ScopeAccessToken {
     <#
     .SYNOPSIS
         Acquires a bearer token for the given audience using the current Az context.
+    .DESCRIPTION
+        Deliberately paranoid about what it returns, because the failure mode when
+        it is not is genuinely hard to diagnose. A malformed header does not come
+        back as a clean 401. Azure answers with HTTP 502 and
+
+            Forbidden: Authentication information is not given in the correct
+            format. Check the value of Authorization header.
+
+        which reads like a permissions problem, sends people to check RBAC, and is
+        actually the client's fault.
+
+        Three ways that happened here:
+
+        - Get-AzAccessToken emitting anything besides the token object - a
+          deprecation notice on the output stream, or a second context - makes
+          $tokenObj an array. "Bearer $token" then renders every element separated
+          by spaces, so the header is nonsense.
+        - Az.Accounts 5.x returns the token as a SecureString. Without conversion
+          the header reads "Bearer System.Security.SecureString".
+        - An expired device-code session can hand back an empty token, giving a
+          bare "Bearer " that Azure rejects with the same message.
+
+        Checking the value here turns all three into an error that names the cause
+        and the fix, instead of a 502 forty lines later.
     .PARAMETER ResourceUrl
         Audience to request. Defaults to ARM. -ValidateQueries passes the Log
         Analytics endpoint instead, because a token minted for ARM is not
@@ -123,11 +147,66 @@ function Get-ScopeAccessToken {
         $ResourceUrl = $env.ResourceManagerUrl.TrimEnd('/')
     }
 
-    $tokenObj = Get-AzAccessToken -ResourceUrl $ResourceUrl -ErrorAction Stop
-    if ($tokenObj.Token -is [securestring]) {
-        return $tokenObj.Token | ConvertFrom-SecureString -AsPlainText
+    # Take the first object explicitly. If the cmdlet wrote anything else to the
+    # output stream, the property access below would otherwise yield an array.
+    $tokenObj = @(Get-AzAccessToken -ResourceUrl $ResourceUrl -ErrorAction Stop)[0]
+    if (-not $tokenObj) {
+        throw "Get-AzAccessToken returned nothing for '$ResourceUrl'. Sign in again: Connect-AzAccount"
     }
-    return $tokenObj.Token
+
+    $raw = $tokenObj.Token
+    if ($raw -is [securestring]) {
+        $raw = $raw | ConvertFrom-SecureString -AsPlainText
+    }
+
+    # Guard against a value that is an array even after the coercion above.
+    if ($raw -is [System.Collections.IEnumerable] -and $raw -isnot [string]) {
+        $raw = @($raw)[0]
+    }
+
+    $token = ([string]$raw).Trim()
+    Assert-ScopeTokenUsable -Token $token -ResourceUrl $ResourceUrl
+    return $token
+}
+
+function Assert-ScopeTokenUsable {
+    <#
+    .SYNOPSIS
+        Fails loudly when a token could not produce a valid Authorization header.
+    .DESCRIPTION
+        Every message names what to do next. The whole point is to stop a bad
+        header reaching Azure, which reports it as HTTP 502 with a Forbidden
+        message about header format - wording that sends operators to check RBAC
+        for a problem that has nothing to do with permissions.
+    #>
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$Token,
+        [string]$ResourceUrl
+    )
+
+    $reconnect = "Sign in again, then re-run. In tenants that require it: Connect-AzAccount -UseDeviceAuth"
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        throw "No access token was returned for '$ResourceUrl'. The Azure session has probably expired. $reconnect"
+    }
+
+    if ($Token -eq 'System.Security.SecureString') {
+        throw "The access token for '$ResourceUrl' came back as an unconverted SecureString. This build of Az.Accounts is not supported; update it: Update-Module Az.Accounts"
+    }
+
+    # Whitespace inside the value means it is not one token - most often several
+    # joined together, which is what an unexpected extra output object produces.
+    if ($Token -match '\s') {
+        throw "The access token for '$ResourceUrl' contains whitespace, so the Authorization header would be malformed. This usually means Get-AzAccessToken returned more than one object. Check for multiple Azure contexts with Get-AzContext -ListAvailable, select one with Set-AzContext, and re-run."
+    }
+
+    # A JWT is three base64url segments separated by dots. Anything else would be
+    # rejected by Azure with a message that does not mention the token at all.
+    if ($Token -notmatch '^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*$') {
+        $preview = if ($Token.Length -gt 12) { $Token.Substring(0, 12) } else { $Token }
+        throw "The value returned for '$ResourceUrl' is not a bearer token (starts '$preview...', length $($Token.Length)). $reconnect"
+    }
 }
 
 # ── Core REST Invocation ──────────────────────────────────────────────────────
@@ -217,6 +296,17 @@ function Invoke-ScopeApi {
                 $statusCode = [int]$_.Exception.Response.StatusCode
             }
 
+            $detail = Format-ApiErrorDetail -ErrorRecord $_
+
+            # Azure reports a malformed Authorization header as HTTP 502 with a
+            # Forbidden message about header format. It is in the retryable set by
+            # status code, but it is entirely deterministic - the same bad header
+            # fails identically every time - so retrying only adds ~14s of backoff
+            # before the same failure. Catch it by its wording and stop.
+            if ($detail -and $detail -match 'Authentication information is not given in the correct format') {
+                throw "HTTP $statusCode on $Method $Uri - Azure rejected the Authorization header as malformed. Despite the wording this is not a permissions problem: the request never reached the point of checking access. The token this tool sent was not usable. Sign in again and re-run. In tenants that require it: Connect-AzAccount -UseDeviceAuth. If it recurs, check for multiple Azure contexts with Get-AzContext -ListAvailable."
+            }
+
             $retryable = $statusCode -in @(429, 500, 502, 503, 504)
 
             if ($retryable -and $attempt -lt $maxAttempts) {
@@ -234,11 +324,8 @@ function Invoke-ScopeApi {
             else {
                 # Enhance the error with readable ARM detail, but preserve 404s
                 # as-is because callers catch those for existence checks.
-                if ($statusCode -and $statusCode -ne 404) {
-                    $detail = Format-ApiErrorDetail -ErrorRecord $_
-                    if ($detail) {
-                        throw "HTTP $statusCode on $Method $Uri - $detail"
-                    }
+                if ($statusCode -and $statusCode -ne 404 -and $detail) {
+                    throw "HTTP $statusCode on $Method $Uri - $detail"
                 }
                 throw
             }
@@ -399,6 +486,7 @@ Export-ModuleMember -Function @(
     'Resolve-ArmEndpoint'
     'Resolve-LogAnalyticsEndpoint'
     'Get-ScopeAccessToken'
+    'Assert-ScopeTokenUsable'
     'Invoke-ScopeApi'
     'Invoke-ScopeApiList'
     'Get-WorkspaceResourceId'

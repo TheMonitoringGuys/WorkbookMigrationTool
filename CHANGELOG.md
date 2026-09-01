@@ -5,6 +5,55 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.2] - 2026-09-01
+
+### Fixed
+
+- The tool now checks its access token before sending it, instead of letting Azure
+  reject a malformed `Authorization` header as an opaque HTTP 502.
+
+  A customer run failed with `HTTP 502 ... Forbidden: Authentication information is
+  not given in the correct format. Check the value of Authorization header.` on the
+  workbook discovery call. The word *Forbidden* sent the investigation towards RBAC,
+  and it was the wrong direction entirely - Azure never got as far as checking access.
+  The header itself was malformed, which is a client-side fault.
+
+  `Get-ScopeAccessToken` took whatever `Get-AzAccessToken` returned and interpolated
+  it straight into the header. Three real conditions break that, and none of them
+  produced a usable error:
+
+  - An expired session returns nothing, giving a bare `Bearer`.
+  - More than one loaded Azure context makes the cmdlet return more than one object,
+    so the header holds two tokens separated by a space.
+  - An unconverted `SecureString` renders as the literal text
+    `System.Security.SecureString`.
+
+  The token is now coerced to a single value, trimmed, and checked for JWT shape. Each
+  failure names its own cause and the command that fixes it.
+
+- A 502 carrying the authorization-header message is no longer retried. It is
+  deterministic - the same bad header fails identically every time - so the three
+  retries only added about fourteen seconds of backoff before the same failure. The
+  error now explains that this is not a permissions problem.
+
+### Added
+
+- `tools/Test-ScopeConnection.ps1`, which reports PowerShell and Az.Accounts versions,
+  how many Azure contexts are loaded, how many objects `Get-AzAccessToken` returns, the
+  token's type, length, shape and expiry, and then performs the exact workbook read
+  that fails. It prints no token material and only reads, so it is safe against
+  production.
+
+  When every token check passes and Azure still rejects the header, it says so and
+  points at an inspecting proxy or TLS interception, which rules out the client rather
+  than leaving it ambiguous.
+
+### Changed
+
+- Split the HTTP 502 troubleshooting entry in two. The same message is produced by a
+  failed run and by a workbook failing to render in the portal, and the two have
+  nothing in common. The entry now leads with how to tell them apart.
+
 ## [1.2.1] - 2026-09-01
 
 ### Fixed
