@@ -5,6 +5,46 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.7] - 2026-09-02
+
+### Fixed
+
+- **The tool no longer refuses to repair a workbook because a previous run said it was
+  done.** `Set-WorkbookDualScope` reported `AlreadyScoped` on the presence of a manifest
+  matching the workspace pair and scope mode, without ever looking at the workbook. It then
+  changed nothing and exited zero.
+
+  The manifest records what an earlier run did. That is a claim about the past, not
+  evidence about the present, and the two come apart in ordinary ways: a portal edit, a
+  Content Hub solution refresh, or a run of this tool that wrote its manifest without
+  finishing all leave the claim sitting on a workbook that reads a single workspace.
+  Trusting it meant refusing to fix precisely the workbooks that needed fixing, and saying
+  "already scoped" while doing so.
+
+  The run now verifies the workbook actually reads both workspaces before accepting the
+  claim, and re-scopes when it does not. Verified against sixteen real workbooks: with the
+  scope stripped and the manifest left in place, all sixteen were previously reported as
+  already scoped and left broken; all sixteen are now repaired, and all sixteen still
+  report `AlreadyScoped` on an ordinary re-run, so idempotency is intact.
+
+### Added
+
+- `Test-WorkbookDualScoped`, which answers whether a workbook genuinely reads from both
+  workspaces by resolving every eligible query through the route it actually uses - literal
+  IDs on the query, the resource picker it names, or the workbook-level default. A picker
+  holding both workspaces but left single-select is reported as broken, because it can only
+  surface one of them.
+
+  `tools/Test-WorkbookScope.ps1` now uses this same function rather than its own copy of
+  the logic, so the audit and the tool that does the work cannot disagree about what
+  "scoped" means.
+
+### Changed
+
+- The audit explains the stale-record case rather than blaming the tool. A workbook that
+  carries a scope record it no longer matches now says so, names the usual causes, and
+  points at the version that repairs it.
+
 ## [1.2.6] - 2026-09-01
 
 ### Fixed

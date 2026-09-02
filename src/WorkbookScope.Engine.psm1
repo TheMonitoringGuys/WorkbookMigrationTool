@@ -447,6 +447,120 @@ function Test-ScopeListSatisfied {
     return ([bool]$hasDest -and [bool]$hasSrc)
 }
 
+function Test-WorkbookDualScoped {
+    <#
+    .SYNOPSIS
+        Whether a workbook genuinely reads from both workspaces right now.
+    .DESCRIPTION
+        Resolves every eligible query by the route it actually uses, rather than
+        taking the manifest's word for it.
+
+        The manifest records what some earlier run did. That is a claim about the
+        past, not evidence about the present, and the two come apart in ordinary
+        ways: a portal edit, a Content Hub solution refresh, or a run of this tool
+        that wrote its manifest without completing the job all leave the claim
+        sitting on a workbook that reads one workspace. Believing the claim means
+        refusing to repair exactly the workbooks that need repairing.
+
+        A query reaches its data by one of three routes, and each has to be judged
+        on its own terms:
+
+          literal    - the resource IDs sit on the query itself
+          parameter  - the query names a picker and the picker holds the IDs. A
+                       single-select picker cannot surface two, so multiSelect
+                       matters as much as the value does
+          inherited  - the query carries no scope, so the workbook-level
+                       fallbackResourceIds decides for it
+
+        Literal mode only. SelfHealing reaches the source through an injected
+        Resource Graph parameter and deliberately leaves fallbackResourceIds
+        alone, so these criteria do not describe it.
+    .OUTPUTS
+        PSCustomObject: Scoped, Total, Satisfied, Unsatisfied, Reasons
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Root,
+        [Parameter(Mandatory)][string]$SourceWorkspaceId,
+        [Parameter(Mandatory)][string]$DestinationWorkspaceId
+    )
+
+    $all = @(Get-WorkbookNode -Root $Root)
+
+    $paramsByName = @{}
+    foreach ($entry in $all) {
+        if (-not (Test-IsParameterNode -Path $entry.Path)) { continue }
+        $n = [string]$entry.Node['name']
+        if ($n -and -not $paramsByName.ContainsKey($n)) { $paramsByName[$n] = $entry.Node }
+    }
+
+    $fallbackOk = Test-ScopeListSatisfied -Existing $Root['fallbackResourceIds'] `
+        -DestinationWorkspaceId $DestinationWorkspaceId -SourceWorkspaceId $SourceWorkspaceId
+
+    $reasons = [System.Collections.Generic.HashSet[string]]::new()
+    $satisfied = 0
+    $unsatisfied = 0
+
+    foreach ($entry in $all) {
+        $node = $entry.Node
+        if (-not (Test-EligibleQueryNode -Node $node)) { continue }
+
+        $ok = $false
+        switch (Get-ScopeReferenceKind -Node $node) {
+            'Literal' {
+                $ok = Test-ScopeListSatisfied -Existing $node['crossComponentResources'] `
+                    -DestinationWorkspaceId $DestinationWorkspaceId -SourceWorkspaceId $SourceWorkspaceId
+                if (-not $ok) { [void]$reasons.Add('a query is scoped to one workspace') }
+            }
+            'None' {
+                $ok = $fallbackOk
+                if (-not $ok) { [void]$reasons.Add('a query inherits a single-workspace default') }
+            }
+            'Parameter' {
+                $name = Get-ReferencedParameterName -Node $node
+                if (-not $name -or -not $paramsByName.ContainsKey($name)) {
+                    [void]$reasons.Add("a query points at a missing parameter '$name'")
+                }
+                else {
+                    $p = $paramsByName[$name]
+                    $valueOk = Test-ScopeListSatisfied -Existing $p['value'] `
+                        -DestinationWorkspaceId $DestinationWorkspaceId -SourceWorkspaceId $SourceWorkspaceId
+                    $multi = ($p['multiSelect'] -eq $true)
+                    $ok = $valueOk -and $multi
+                    if ($valueOk -and -not $multi) {
+                        [void]$reasons.Add("parameter '$name' holds both workspaces but is not multi-select")
+                    }
+                    elseif (-not $valueOk) {
+                        [void]$reasons.Add("parameter '$name' does not hold both workspaces")
+                    }
+                }
+            }
+        }
+
+        if ($ok) { $satisfied++ } else { $unsatisfied++ }
+    }
+
+    $total = $satisfied + $unsatisfied
+
+    # With no queries of its own, the workbook-level default is the only thing
+    # that could carry scope.
+    $scoped = $false
+    if ($total -eq 0) { $scoped = $fallbackOk }
+    else { $scoped = ($unsatisfied -eq 0) -and $fallbackOk }
+
+    if (-not $fallbackOk -and $unsatisfied -eq 0) {
+        [void]$reasons.Add('the workbook default names only one workspace')
+    }
+
+    return [PSCustomObject]@{
+        Scoped      = [bool]$scoped
+        Total       = $total
+        Satisfied   = $satisfied
+        Unsatisfied = $unsatisfied
+        Reasons     = @($reasons)
+    }
+}
+
 # ── Manifest ──────────────────────────────────────────────────────────────────
 function Get-DualScopeManifest {
     <#
@@ -628,11 +742,38 @@ function Set-WorkbookDualScope {
         $existingMode = 'Literal'
         if ($existing.Contains('scopeMode') -and $existing['scopeMode']) { $existingMode = [string]$existing['scopeMode'] }
         if ($existingMode -ieq $ScopeMode) {
-            return [PSCustomObject]@{
-                Action  = 'AlreadyScoped'
-                Changes = @()
-                Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
+            # The manifest says a previous run already did this. Check the
+            # workbook still shows it before believing that.
+            #
+            # This used to return here on the manifest alone, which made the tool
+            # refuse to repair the workbooks most in need of repair: a portal
+            # edit, a Content Hub solution refresh, or an earlier run that wrote
+            # its manifest without finishing all leave the claim behind on a
+            # workbook that reads one workspace. The run then reported
+            # "already scoped", changed nothing, and exited zero, while the
+            # workbook went on showing destination data only.
+            $stillScoped = $false
+            if ($ScopeMode -eq 'Literal') {
+                $stillScoped = (Test-WorkbookDualScoped -Root $Root `
+                        -SourceWorkspaceId $SourceWorkspaceId `
+                        -DestinationWorkspaceId $DestinationWorkspaceId).Scoped
             }
+            else {
+                # SelfHealing carries the source through the injected parameter,
+                # so that parameter still being present is what makes the claim
+                # true.
+                $stillScoped = (Get-ScopeParameterItemIndex -Root $Root) -ge 0
+            }
+
+            if ($stillScoped) {
+                return [PSCustomObject]@{
+                    Action  = 'AlreadyScoped'
+                    Changes = @()
+                    Stats   = [ordered]@{ Eligible = 0; Added = 0; Replaced = 0; ParametersPatched = 0; ScopedViaPicker = 0; Fallback = 0; Skipped = 0 }
+                }
+            }
+
+            Write-Verbose 'Manifest claims this workbook is already scoped, but its queries do not read both workspaces. Re-scoping.'
         }
     }
 
@@ -1260,6 +1401,7 @@ Export-ModuleMember -Function @(
     'Test-IsParameterNode'
     'Get-DualScopeList'
     'Test-ScopeListSatisfied'
+    'Test-WorkbookDualScoped'
     'Get-DualScopeManifest'
     'Set-DualScopeManifest'
     'Remove-DualScopeManifest'

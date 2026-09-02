@@ -142,6 +142,43 @@ different audience from ARM. Restricted tenants sometimes refuse to issue it. Th
 degrades rather than failing: the validation section reports the error and the
 workbooks are still scoped correctly.
 
+### The run says "already scoped" but the workbooks still show one workspace
+
+**Cause:** Up to version 1.2.6 the tool trusted a record it writes into each workbook it
+scopes. If that record was present and named the same two workspaces, the run reported
+`Already scoped`, changed nothing, and exited zero - without ever checking whether the
+workbook still matched it.
+
+The record says what an earlier run did. It is not evidence about the present, and the two
+come apart in ordinary ways:
+
+- someone edited the workbook in the portal and saved it
+- a Content Hub solution update rewrote its own workbook
+- an earlier run of this tool wrote the record without completing the work
+
+In each case the record survives on a workbook that reads a single workspace, and every
+subsequent run declined to fix it.
+
+**Fix:** upgrade to 1.2.7 or later, which checks the workbook itself before believing the
+record, and re-run:
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute
+```
+
+To see which workbooks are affected before upgrading:
+
+```powershell
+./tools/Test-WorkbookScope.ps1 `
+    -SubscriptionId <destination-sub> `
+    -ResourceGroupName <destination-rg> `
+    -WorkspaceName <destination-workspace> `
+    -SourceWorkspaceName <old-workspace>
+```
+
+Any workbook listed with `PROCESSED = yes` and a verdict of `PARTIAL` or `NOT SCOPED` is in
+this state.
+
 ### Some workbooks show the old workspace's data and others do not
 
 Most often this is not a failure. By default the tool only updates workbooks the

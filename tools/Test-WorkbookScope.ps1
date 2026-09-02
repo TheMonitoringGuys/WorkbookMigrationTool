@@ -85,14 +85,6 @@ Write-Host "  destination : $WorkspaceName"
 Write-Host "  source      : $SourceWorkspaceName"
 Write-Host ''
 
-function Test-ListHasBoth {
-    param([object]$List)
-    $v = @(ConvertTo-SafeArray $List | ForEach-Object { [string]$_ })
-    $hasDest = [bool]($v | Where-Object { $_ -ieq $destId })
-    $hasSrc = [bool]($v | Where-Object { $_ -ieq $srcId })
-    return ($hasDest -and $hasSrc)
-}
-
 $listUri = Get-WorkbooksUri -ArmEndpoint $arm -SubscriptionId $SubscriptionId `
     -ResourceGroupName $ResourceGroupName -SourceId $destId -ExcludeContent
 $stubs = @(Invoke-ScopeApiList -Uri $listUri -ThrottleDelayMs 50)
@@ -137,59 +129,19 @@ foreach ($stub in $stubs) {
     }
 
     $processed = [bool](Get-DualScopeManifest -Root $tree)
-    $fallbackBoth = Test-ListHasBoth -List $tree['fallbackResourceIds']
 
-    # Index parameters so a query that points at a picker can be resolved through it.
-    $params = @{}
-    foreach ($e in @(Get-WorkbookNode -Root $tree)) {
-        if (-not (Test-IsParameterNode -Path $e.Path)) { continue }
-        $n = [string]$e.Node['name']
-        if ($n -and -not $params.ContainsKey($n)) { $params[$n] = $e.Node }
-    }
+    # One implementation of "is this actually scoped", shared with the engine, so
+    # the audit and the tool that does the work can never disagree about it.
+    $check = Test-WorkbookDualScoped -Root $tree -SourceWorkspaceId $srcId -DestinationWorkspaceId $destId
+    $ok = $check.Satisfied
+    $bad = $check.Unsatisfied
+    $total = $check.Total
+    $reasons = @($check.Reasons)
 
-    $ok = 0; $bad = 0
-    $reasons = [System.Collections.Generic.HashSet[string]]::new()
-
-    foreach ($e in @(Get-WorkbookNode -Root $tree)) {
-        $node = $e.Node
-        if (-not (Test-EligibleQueryNode -Node $node)) { continue }
-
-        switch (Get-ScopeReferenceKind -Node $node) {
-            'Literal' {
-                if (Test-ListHasBoth -List $node['crossComponentResources']) { $ok++ }
-                else { $bad++; [void]$reasons.Add('query scoped to one workspace') }
-            }
-            'None' {
-                # No scope of its own, so it uses the workbook-level default.
-                if ($fallbackBoth) { $ok++ }
-                else { $bad++; [void]$reasons.Add('inherits a single-workspace default') }
-            }
-            'Parameter' {
-                $pn = Get-ReferencedParameterName -Node $node
-                if (-not $pn -or -not $params.ContainsKey($pn)) {
-                    $bad++; [void]$reasons.Add("points at a missing parameter '$pn'")
-                    break
-                }
-                $p = $params[$pn]
-                $valueBoth = Test-ListHasBoth -List $p['value']
-                $multi = ($p['multiSelect'] -eq $true)
-                if ($valueBoth -and $multi) { $ok++ }
-                elseif ($valueBoth -and -not $multi) {
-                    # Both IDs present but the picker can only surface one of them.
-                    $bad++; [void]$reasons.Add("parameter '$pn' holds both but is not multi-select")
-                }
-                else {
-                    $bad++; [void]$reasons.Add("parameter '$pn' does not hold both workspaces")
-                }
-            }
-        }
-    }
-
-    $total = $ok + $bad
-    $verdict = if ($total -eq 0) { 'no queries' }
-    elseif ($bad -eq 0) { 'OK' }
-    elseif ($ok -eq 0) { 'NOT SCOPED' }
-    else { 'PARTIAL' }
+    $verdict = 'PARTIAL'
+    if ($total -eq 0 -and -not $check.Scoped) { $verdict = 'no queries' }
+    elseif ($check.Scoped) { $verdict = 'OK' }
+    elseif ($ok -eq 0) { $verdict = 'NOT SCOPED' }
 
     $rows.Add([PSCustomObject]@{
             Name = $name; Migrated = $migrated; Processed = $processed
@@ -284,14 +236,22 @@ if ($skippedByTag.Count -gt 0) {
 
 $processedButBroken = @($broken | Where-Object { $_.Processed })
 if ($processedButBroken.Count -gt 0) {
-    Write-Host "$($processedButBroken.Count) workbook(s) were processed but are still not fully scoped:" -ForegroundColor Red
+    Write-Host "$($processedButBroken.Count) workbook(s) carry a scope record but do not match it:" -ForegroundColor Red
     foreach ($r in $processedButBroken) {
         Write-Host "    $($r.Name)  ($($r.Ok)/$($r.Total) queries)" -ForegroundColor Red
         foreach ($why in $r.Reasons) { Write-Host "        - $why" -ForegroundColor Red }
     }
     Write-Host ''
-    Write-Host '  This is a tool defect rather than a configuration problem. Send this' -ForegroundColor Red
-    Write-Host '  output on so the failing route can be fixed.' -ForegroundColor Red
+    Write-Host '  A previous run scoped these and something has since undone it - usually a' -ForegroundColor Yellow
+    Write-Host '  portal edit or a Content Hub solution refresh, both of which rewrite the' -ForegroundColor Yellow
+    Write-Host '  workbook and can drop the scope while leaving the record behind.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  Up to version 1.2.6 the tool trusted that record and reported these as' -ForegroundColor Yellow
+    Write-Host '  already scoped, so re-running changed nothing. From 1.2.7 it checks the' -ForegroundColor Yellow
+    Write-Host '  workbook itself and repairs them.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  Upgrade, then re-run:' -ForegroundColor Green
+    Write-Host '     ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute' -ForegroundColor Green
     Write-Host ''
 }
 
