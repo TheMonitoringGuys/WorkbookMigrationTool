@@ -1,18 +1,20 @@
 name: Tests
 
-# NOTE: as of adding this file, GitHub Actions does not execute in this repository.
-# It is a private repo owned by an Enterprise Managed User account, where Actions is
-# disabled by enterprise policy - the Actions API reports zero registered workflows and
-# zero runs, and the PR that added the model workflow received no check runs at all.
+# This runs the OFFLINE suite: the network is stubbed and the assertions are
+# against JSON the tool produced itself. A green check mark here means the logic
+# agrees with itself - it does NOT mean the tool works against Azure.
 #
-# The workflow is kept because it is valid and will start working unchanged if the repo
-# moves to an org with Actions enabled, or the policy changes.
+# Live verification is tests/Live.Azure.Tests.ps1, which needs a real lab and so
+# cannot run here. It skips unless the WBSCOPE_LAB_* variables are set, and prints
+# that it did. Same for tests/ArmContract.Tests.ps1, which needs a recorded ARM
+# response from tools/Save-ArmFixture.ps1.
 #
-# Until then the real gate is local. Install it once per clone:
+# Do not report this workflow passing as "verified". That claim, made from a green
+# offline suite, is what put a non-working tool in front of a customer.
+#
+# A local pre-push gate running the same suite is available:
 #
 #   ./tools/Install-GitHooks.ps1
-#
-# That enables a pre-push hook running this same suite, refusing the push on failure.
 on:
   push:
     branches: [main]

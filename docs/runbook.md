@@ -228,6 +228,8 @@ Install the local pre-push gate once per clone:
 ./tools/Install-GitHooks.ps1
 ```
 
-The hook runs the full Pester suite and refuses the push on failure. GitHub Actions is
-present as a valid workflow file, but it does not execute in this repository while
-enterprise policy disables Actions for the private EMU repo.
+The hook runs the full Pester suite and refuses the push on failure. GitHub Actions
+also runs that suite on the public `TheMonitoringGuys/WorkbookMigrationTool`
+repository. Both run the **offline** suite only: a green result means the logic
+agrees with itself, not that the tool works against Azure. See
+`tests/Live.Azure.Tests.ps1` for that.
