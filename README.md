@@ -198,6 +198,19 @@ this scoping silently reverted by a later solution update.
 
 ## Known limitations
 
+**Nothing in this tool has been verified end to end against live Azure.** The
+offline test suite runs with the network stubbed and asserts on JSON the tool
+produced itself. It cannot observe how the Workbooks engine renders a scoped
+workbook, which is what actually decides whether the tool works. A green offline
+run is not verification, and reporting it as such is how this tool was signed off
+while returning no historical data in a customer tenant.
+
+`tests/Live.Azure.Tests.ps1` is the suite that can settle it: it runs the real
+tool against a real lab, reads the workbooks back out of ARM, and requires query
+results from **both** workspaces. It skips unless the lab variables are set. Run
+it before describing this tool as verified. See [Recovery](docs/recovery.md) if an
+environment is already affected.
+
 **The self-healing behaviour has not been verified against live Azure.** Each
 mechanism it relies on is individually documented by Microsoft — `isGlobal`,
 `isHiddenWhenLocked`, an unset `isRequired`, and an empty parameter collapsing out of
@@ -227,6 +240,7 @@ workspace should also see it in Resource Graph, but confirm it with
 |---|---|
 | [Customer Guide](docs/customer-guide.md) | Setup, every parameter, expected behaviour, output files |
 | [Runbook](docs/runbook.md) | The step-by-step procedure, re-runs, rollback, CI/CD |
+| [Recovery](docs/recovery.md) | Workbooks show no historical data after a run — diagnosis and repair |
 | [Troubleshooting](docs/troubleshooting.md) | When something fails |
 | [Changelog](CHANGELOG.md) | What changed, including breaking changes |
 
