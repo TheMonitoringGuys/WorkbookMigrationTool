@@ -90,5 +90,18 @@ if ($result.SkippedCount -gt 0) {
     # so the totals always agreed no matter how many tests never ran.
     Write-Host ("pre-push: {0} test(s) skipped." -f $result.SkippedCount) -ForegroundColor Yellow
 }
+
+# This suite is offline. Every assertion in it runs against JSON this tool
+# produced itself, with the network stubbed. It cannot observe how the Azure
+# Workbooks engine renders a scoped workbook, which is what actually decides
+# whether the tool works. A green run here has previously been reported as
+# "verified" while the tool returned no historical data in a customer tenant.
+$liveRan = @($result.Tests | Where-Object { $_.Tag -contains 'Live' -and $_.Result -eq 'Passed' }).Count
+if ($liveRan -eq 0) {
+    Write-Host ''
+    Write-Host 'pre-push: this is the OFFLINE suite. Live Azure verification did not run.' -ForegroundColor Yellow
+    Write-Host '          Passing here does not mean the tool works against Azure.' -ForegroundColor Yellow
+    Write-Host '          See tests/Live.Azure.Tests.ps1 before claiming it is verified.' -ForegroundColor Yellow
+}
 Write-Host ''
 exit 0

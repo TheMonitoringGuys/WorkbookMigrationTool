@@ -20,6 +20,7 @@ BeforeAll {
             [Nullable[int]]$ScopedViaPicker = 0,
             [string]$Reason = '',
             [string]$Method = 'Manifest',
+            [switch]$FallbackUpdated,
             [switch]$OmitScopedViaPicker,
             [switch]$Minimal
         )
@@ -35,7 +36,7 @@ BeforeAll {
             Added             = $Added
             Replaced          = $Replaced
             ParametersPatched = $ParametersPatched
-            FallbackUpdated   = $false
+            FallbackUpdated   = [bool]$FallbackUpdated
             Reason            = $Reason
             Method            = $Method
         }
@@ -239,6 +240,79 @@ Describe 'Markdown renderer robustness' {
         $report = New-ReportText -RunResult (New-TestRunResult -Results @(New-WorkbookResult))
 
         $report | Should -Not -Match '\$(sourceName|destName|scoped|reverted|RunResult)\b'
+    }
+}
+
+Describe 'Scope evidence' {
+    <#
+        'Scoped' covers routes of very different strength, and the report used to
+        present them identically. A workbook whose queries each name the source
+        is a different claim from one where only the workbook-level fallback was
+        extended - the latter is overridden by any query carrying its own scope.
+
+        Reporting them the same way is how a run looks completely clean while a
+        workbook returns no historical data. This is the real 'all devices' case
+        from the sample corpus: Action=Scoped with every counter at zero.
+    #>
+
+    It 'calls per-query scope the strongest evidence' {
+        $r = New-WorkbookResult -Added 3 -Replaced 1
+        (Get-ScopeEvidence -Result $r).Label | Should -Be 'Per-query'
+        (Get-ScopeEvidence -Result $r).Tone | Should -Be 'good'
+    }
+
+    It 'recognises a patched picker' {
+        $r = New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 2
+        (Get-ScopeEvidence -Result $r).Label | Should -Be 'Picker'
+        (Get-ScopeEvidence -Result $r).Tone | Should -Be 'good'
+    }
+
+    It 'recognises the injected reference appended beside a customer picker' {
+        $r = New-WorkbookResult -Added 0 -Replaced 0 -ScopedViaPicker 4
+        (Get-ScopeEvidence -Result $r).Label | Should -Be 'Picker'
+    }
+
+    It 'warns when only the workbook-level fallback was extended' {
+        $r = New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0 -FallbackUpdated
+        (Get-ScopeEvidence -Result $r).Label | Should -Be 'Fallback only'
+        (Get-ScopeEvidence -Result $r).Tone | Should -Be 'warn'
+    }
+
+    It 'reports no evidence when nothing changed at all' {
+        $r = New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0
+        (Get-ScopeEvidence -Result $r).Label | Should -Be 'None'
+        (Get-ScopeEvidence -Result $r).Tone | Should -Be 'bad'
+    }
+
+    It 'names weakly scoped workbooks in the report, not just a count' {
+        # "3 workbooks on weak evidence" is not actionable in the report someone
+        # reads when the dashboards disagree with the run.
+        $run = New-TestRunResult -Results @(
+            (New-WorkbookResult -DisplayName 'Strong wb' -Added 5),
+            (New-WorkbookResult -DisplayName 'all devices' -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0 -FallbackUpdated)
+        )
+        $report = New-ReportText -RunResult $run
+
+        $report | Should -Match 'Workbooks scoped on weak evidence'
+        $report | Should -Match 'all devices'
+        $report | Should -Match 'Fallback only'
+    }
+
+    It 'keeps the weak-evidence KPI off a report where every workbook is strongly scoped' {
+        $run = New-TestRunResult -Results @((New-WorkbookResult -DisplayName 'Strong wb' -Added 5))
+        $report = New-ReportText -RunResult $run
+
+        $report | Should -Not -Match 'Scoped on weak evidence'
+        $report | Should -Not -Match 'Workbooks scoped on weak evidence'
+    }
+
+    It 'does not label a failed workbook with scope evidence' {
+        $run = New-TestRunResult -Results @(
+            (New-WorkbookResult -DisplayName 'Broken wb' -Action 'Failed' -Added 0 -Replaced 0 -Reason 'boom')
+        )
+        $report = New-ReportText -RunResult $run
+
+        $report | Should -Not -Match 'Workbooks scoped on weak evidence'
     }
 }
 

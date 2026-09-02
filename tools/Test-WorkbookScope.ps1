@@ -124,6 +124,14 @@ Write-Host "  destination : $WorkspaceName" -ForegroundColor White
 Write-Host "                $destId" -ForegroundColor DarkGray
 Write-Host "  source      : $SourceWorkspaceName" -ForegroundColor White
 Write-Host "                $srcId" -ForegroundColor DarkGray
+# Every data-plane check below runs as whoever is signed in. An operator with
+# Contributor or Owner passes all of them while the people reporting empty tiles
+# still cannot read the source workspace, so the audit reads "clean" and the
+# dashboards stay blank. Naming the identity is what stops that being missed.
+$auditCtx = Get-AzContext -ErrorAction SilentlyContinue
+$auditIdentity = if ($auditCtx -and $auditCtx.Account) { [string]$auditCtx.Account.Id } else { 'unknown' }
+Write-Host "  running as  : $auditIdentity" -ForegroundColor White
+Write-Host '                access checks below reflect THIS identity, not your viewers' -ForegroundColor DarkGray
 Write-Host ''
 
 function Write-Check {
@@ -363,6 +371,18 @@ if ($broken.Count -eq 0 -and $untouched.Count -eq 0) {
     Write-Host '    can read, so this looks like missing data rather than an error.' -ForegroundColor Green
     Write-Host '  - the time range predates ingestion stopping in the old workspace.' -ForegroundColor Green
     Write-Host '    Widen it to a window that covers before the migration.' -ForegroundColor Green
+    Write-Host ''
+    Write-Host "  The checks above passed as '$auditIdentity'. That does not mean they" -ForegroundColor Yellow
+    Write-Host '  pass for the people reporting empty tiles. Scope is correct here, so if' -ForegroundColor Yellow
+    Write-Host '  anyone still sees no history the next step is to establish whether it is' -ForegroundColor Yellow
+    Write-Host '  their access rather than the workbooks:' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '     Have one affected viewer open a workbook while you open the same one.' -ForegroundColor Green
+    Write-Host '     You see history and they do not  ->  it is their permissions.' -ForegroundColor Green
+    Write-Host '     Neither of you sees history      ->  it is not permissions; re-audit.' -ForegroundColor Green
+    Write-Host ''
+    Write-Host '     Or re-run this audit signed in as an affected viewer.' -ForegroundColor Green
+    Write-Host ''
     if ($unreadable -gt 0) {
         Write-Host ''
         Write-Warning "$unreadable workbook(s) could not be read and were not assessed."

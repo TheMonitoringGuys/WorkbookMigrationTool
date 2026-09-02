@@ -11,10 +11,15 @@ visible.
 This tool re-scopes those workbooks so each eligible Log Analytics query reads from
 both workspaces. It does that by setting workbook scope metadata, not by editing KQL.
 
-By default the source workspace is referenced through a hidden parameter that
-resolves only while that workspace exists, so the workbooks keep working when it is
-eventually deleted. `-Revert` is then optional tidy-up rather than a prerequisite for
-decommissioning. See [Scope modes](#scope-modes).
+By default (`-ScopeMode Literal`) the source workspace is referenced by its resource
+ID, written directly into each query's scope. **`-Revert` is therefore mandatory
+before the source workspace is decommissioned** — a literal reference to a deleted
+workspace makes the tile fail.
+
+The opt-in `-ScopeMode SelfHealing` removes that ordering requirement by referencing
+the source through a hidden parameter that resolves only while the workspace exists,
+at the cost of requiring every viewer to have Reader on the source subscription. See
+[Scope modes](#scope-modes).
 
 ## Prerequisites
 
@@ -151,7 +156,7 @@ before it is decommissioned.
 | Depends on Resource Graph | No | Yes |
 | Viewer permission needed | Log Analytics Reader on both workspaces | The same, **plus Reader on the source subscription** |
 | Failure mode when a viewer lacks that access | Tile shows a clear error | **HTTP 502 on the whole workbook** |
-| Exercised against a live tenant | Yes | Yes — and it surfaced the permission problem above |
+| Exercised against a live tenant | **No — see README "Known limitations"** | **No** |
 
 Prefer `Literal` unless you have confirmed subscription-scope read for every person
 who will open these workbooks. Self-healing's advantage is real — it removes the
@@ -159,8 +164,11 @@ requirement to revert before decommissioning — but it trades a narrow, obvious
 failure for a broad, confusing one when permissions are short.
 
 The self-healing transform itself is verified offline against 523 real queries: all
-of them keep a usable destination scope when the source workspace disappears. What
-live use corrected was the permission assumption, not the transform.
+of them keep a usable destination scope when the source workspace disappears. That is
+an offline result only — it proves the JSON transform, not the runtime behaviour of
+the Workbooks engine. Neither mode has been verified end to end against a live tenant.
+The permission caveat above is derived from Azure's documented behaviour and a
+customer incident, not from a controlled live test.
 
 ## CLI parameters
 
@@ -178,7 +186,7 @@ All config keys can be overridden by CLI parameters. CLI values win.
 | `-DryRun` | Report what would change and write nothing. This is the default parameter set. |
 | `-Execute` | Apply the changes. Prompts unless `-Force` is also passed. |
 | `-Revert` | Restore destination-only scope. Combine with `-Execute` to apply it. Optional in `SelfHealing` mode, mandatory before decommissioning in `Literal` mode. Works even after the source workspace has been deleted. |
-| `-ScopeMode <SelfHealing\|Literal>` | How the source workspace is referenced. Defaults to `SelfHealing`. See [Scope modes](#scope-modes). |
+| `-ScopeMode <SelfHealing\|Literal>` | How the source workspace is referenced. Defaults to `Literal`. See [Scope modes](#scope-modes). |
 | `-Cloud <Commercial\|Gov>` | Azure cloud environment. Defaults to `Commercial` through config normalisation. |
 | `-Force` | Skip the confirmation prompt in execute mode. Required for unattended runs. |
 | `-ValidateQueries` | After scoping, run a real cross-workspace query and compare table coverage. In `SelfHealing` mode it also confirms the injected scope parameter resolves for the running identity. Needs Log Analytics data-plane read access. |
@@ -256,10 +264,28 @@ their count is greater than zero, so a run never shows one that does not apply.
 |---|---|
 | Parameters patched | A workspace picker the tool actually rewrote to name both workspaces. Literal mode only. |
 | Scoped via existing picker | A query that kept its own picker untouched and had the self-healing scope reference appended beside it. Self-healing mode only. |
+| Scoped on weak evidence | Workbooks reporting success where the scope did **not** reach any query directly. Shown only when it applies. |
 
 The distinction matters because self-healing deliberately leaves the customer's
 picker alone. An earlier version counted both as "parameters patched", so a run
 reported having patched 237 parameters while every picker was byte-identical.
+
+### Scope evidence
+
+`Scoped` covers routes of very different strength, and reporting them
+identically is how a run can look completely clean while a workbook returns no
+historical data. Each scoped workbook now carries an evidence label:
+
+| Evidence | Meaning |
+|---|---|
+| `Per-query` | Queries name the source workspace directly. Strongest. |
+| `Picker` | A workspace picker carries the source. Real, but depends on the picker resolving at render time for the viewer. |
+| `Fallback only` | **Only** the workbook-level `fallbackResourceIds` was extended. Any query carrying its own scope ignores it. |
+| `None` | Nothing changed, yet the action claims otherwise. |
+
+Anything other than `Per-query` or `Picker` is listed by name under *Workbooks
+scoped on weak evidence* in the report. Check those first when historical data
+is missing.
 
 ### Decommission readiness
 

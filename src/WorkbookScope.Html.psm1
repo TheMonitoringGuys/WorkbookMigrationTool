@@ -90,6 +90,29 @@ function Get-ScopeResultSum {
     return $sum
 }
 
+function Get-ScopeEvidence {
+    <#
+    .SYNOPSIS
+        Classifies how strongly a result supports the claim that it is scoped.
+    .DESCRIPTION
+        Deliberately duplicated from WorkbookScope.Report.psm1, matching the
+        existing arrangement in this module: the HTML summary computes its own
+        KPIs so it can add presentation-only entries such as 'Scope mode'. The
+        two must stay in step. Report.Tests.ps1 and Html.Tests.ps1 both assert
+        the classification, so a change to one without the other fails.
+    #>
+    [CmdletBinding()]
+    param([object]$Result)
+
+    $perQuery = [int](Get-ScopeProp $Result 'Added' 0) + [int](Get-ScopeProp $Result 'Replaced' 0)
+    $pickerWork = [int](Get-ScopeProp $Result 'ParametersPatched' 0) + [int](Get-ScopeProp $Result 'ScopedViaPicker' 0)
+
+    if ($perQuery -gt 0) { return @{ Label = 'Per-query'; Tone = 'good' } }
+    if ($pickerWork -gt 0) { return @{ Label = 'Picker'; Tone = 'good' } }
+    if (Get-ScopeProp $Result 'FallbackUpdated' $false) { return @{ Label = 'Fallback only'; Tone = 'warn' } }
+    return @{ Label = 'None'; Tone = 'bad' }
+}
+
 function Get-ScopeKpis {
     param([object]$RunResult)
     $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
@@ -114,6 +137,13 @@ function Get-ScopeKpis {
     }
     if ($parametersPatched -gt 0) { $kpis['Parameters patched'] = $parametersPatched }
     if ($scopedViaPicker -gt 0) { $kpis['Scoped via existing picker'] = $scopedViaPicker }
+
+    $weak = @($results | Where-Object {
+            (Get-NormalizedAction $_.Action) -in @('Scoped', 'AlreadyScoped') -and
+            (Get-ScopeEvidence -Result $_).Tone -ne 'good'
+        }).Count
+    if ($weak -gt 0) { $kpis['Scoped on weak evidence'] = $weak }
+
     $kpis['Errors'] = @($errors).Count
     return $kpis
 }
@@ -367,6 +397,7 @@ function ConvertTo-WorkbookRows {
             DisplayName       = $r.DisplayName
             WorkbookId        = $r.WorkbookId
             Method            = $r.Method
+            Evidence          = if ((Get-NormalizedAction $r.Action) -in @('Scoped', 'AlreadyScoped')) { (Get-ScopeEvidence -Result $r).Label } else { '' }
             Eligible          = $r.Eligible
             Ineligible        = $r.Ineligible
             Added             = $r.Added
@@ -494,7 +525,7 @@ function New-ScopeSummaryHtml {
     }
     $hasDetails = @($details.Keys).Count -gt 0
     $kpiAnchor = @{ 'Failed' = 'Workbooks'; 'Errors' = 'Errors' }
-    $kpiTone = @{ 'Scoped to both' = 'good'; 'Reverted' = 'good'; 'Failed' = 'bad'; 'Skipped' = 'warn'; 'Errors' = 'bad' }
+    $kpiTone = @{ 'Scoped to both' = 'good'; 'Reverted' = 'good'; 'Failed' = 'bad'; 'Skipped' = 'warn'; 'Errors' = 'bad'; 'Scoped on weak evidence' = 'warn' }
     $cards = foreach ($k in @($kpis.Keys)) {
         $anchor = ''
         if ($hasDetails -and $kpiAnchor.ContainsKey($k) -and $details.Contains($kpiAnchor[$k])) { $anchor = ConvertTo-ScopeSlug $kpiAnchor[$k] }

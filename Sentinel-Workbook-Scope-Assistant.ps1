@@ -447,8 +447,10 @@ try {
 
             # Snapshot before the first edit - this is the authoritative restore
             # source, so it must exist even if everything after this point fails.
+            # The whole resource is captured, not just serializedData: a PUT
+            # replaces the resource, so tags and kind need restoring too.
             $result.SnapshotPath = Save-WorkbookSnapshot -OutputPath $outputPath `
-                -WorkbookId $wb.name -SerializedData $serialized
+                -WorkbookId $wb.name -SerializedData $serialized -Resource $wb
 
             $root = ConvertFrom-SerializedWorkbook -Json $serialized
             $summary = Get-WorkbookScopeSummary -Root $root
@@ -460,13 +462,18 @@ try {
                 # A snapshot from the run that applied the scope beats the
                 # embedded manifest: it is the exact original, not a replay.
                 $restored = $null
+                $restoredResource = $null
                 if ($SnapshotPath) {
                     $restored = Get-WorkbookSnapshot -OutputPath $SnapshotPath -WorkbookId $wb.name
+                    # Null for a version 1 snapshot, which held serializedData
+                    # only. The scope still reverts; the resource-level fields
+                    # simply cannot be restored from it.
+                    $restoredResource = Get-WorkbookSnapshot -OutputPath $SnapshotPath -WorkbookId $wb.name -AsResource
                 }
                 if ($restored) {
                     $newSerialized = $restored
                     $result.Action = 'Reverted'
-                    $result.Method = 'Snapshot'
+                    $result.Method = if ($restoredResource) { 'Snapshot' } else { 'Snapshot (content only)' }
                 }
                 else {
                     $rev = Restore-WorkbookScope -Root $root -SourceWorkspaceId $sourceId
@@ -510,11 +517,28 @@ try {
             $tags = Get-WorkbookScopeTag -ExistingTags $wb.tags `
                 -SourceWorkspaceName $config.Source.WorkspaceName -Revert:$isRevert
 
+            # Restoring from a full snapshot means restoring the tags as they
+            # were read, not the live ones with this tool's two removed. Anything
+            # else added to the workbook since the run would otherwise survive a
+            # "restore to the exact original".
+            if ($isRevert -and $restoredResource -and $restoredResource.PSObject.Properties['tags']) {
+                $tags = Get-WorkbookScopeTag -ExistingTags $restoredResource.tags `
+                    -SourceWorkspaceName $config.Source.WorkspaceName -Revert
+            }
+
             $props = $wb.properties | ConvertTo-Json -Depth 100 | ConvertFrom-Json
             $props.serializedData = $newSerialized
             # Read-only on the workbooks API; sending them back is rejected.
             foreach ($ro in @('timeModified', 'userId', 'revision')) {
                 if ($props.PSObject.Properties[$ro]) { $props.PSObject.Properties.Remove($ro) }
+            }
+            # A null here is not the same as an absent key. storageUri null on a
+            # workbook that keeps its definition in customer-owned storage asks
+            # ARM to unlink that storage, which loses the definition. The GET
+            # returns these keys as null for the ordinary case, so they have to
+            # be dropped rather than echoed.
+            foreach ($p in @($props.PSObject.Properties)) {
+                if ($null -eq $p.Value) { $props.PSObject.Properties.Remove($p.Name) }
             }
 
             $body = @{
@@ -522,6 +546,15 @@ try {
                 tags       = $tags
                 kind       = if ($wb.kind) { $wb.kind } else { 'shared' }
                 properties = $props
+            }
+
+            # A PUT replaces the resource. Omitting an assigned managed identity
+            # removes it, which breaks a storage-backed workbook permanently -
+            # and the scope update would still report success. Every workbook in
+            # the sample corpus is identity 'None', so this costs nothing there
+            # and prevents a silent, unrecoverable loss elsewhere.
+            if ($wb.PSObject.Properties['identity'] -and $wb.identity) {
+                $body['identity'] = $wb.identity
             }
 
             $uri = Get-WorkbookUri -ArmEndpoint $armEndpoint `

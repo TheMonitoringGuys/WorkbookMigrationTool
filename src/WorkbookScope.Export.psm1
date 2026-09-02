@@ -74,16 +74,28 @@ function Test-ExportModuleAvailable {
 function Save-WorkbookSnapshot {
     <#
     .SYNOPSIS
-        Saves an untouched workbook serializedData snapshot for revert.
+        Saves an untouched workbook snapshot for revert.
     .DESCRIPTION
-        Writes the exact serializedData string to OutputPath\snapshots using a
-        filesystem-safe workbook identifier. Existing snapshots are not overwritten.
+        A PUT replaces the whole resource, so a snapshot holding only
+        serializedData cannot restore what a run overwrote at resource level -
+        tags most obviously, but also kind and any identity. Version 2 captures
+        the ARM resource as read, with serializedData inside it.
+
+        Version 1 files - a bare serializedData string - are still written when
+        no resource is supplied, and are still read by Get-WorkbookSnapshot.
+        Existing run folders are the customer's rollback source and must keep
+        working.
+
+        Existing snapshots are not overwritten.
     .PARAMETER OutputPath
         Run output directory.
     .PARAMETER WorkbookId
         Workbook identifier used to derive the snapshot file name.
     .PARAMETER SerializedData
         The untouched serializedData string read before any workbook edit.
+    .PARAMETER Resource
+        The full workbook resource as returned by ARM. Supplying it produces a
+        version 2 snapshot.
     .OUTPUTS
         The full snapshot path.
     #>
@@ -91,36 +103,89 @@ function Save-WorkbookSnapshot {
     param(
         [Parameter(Mandatory)][string]$OutputPath,
         [Parameter(Mandatory)][string]$WorkbookId,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$SerializedData
+        [Parameter(Mandatory)][AllowEmptyString()][string]$SerializedData,
+        [object]$Resource
     )
     $dir = Join-Path $OutputPath 'snapshots'
     if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
     $path = Join-Path $dir (Get-SafeSnapshotName -WorkbookId $WorkbookId)
     if (Test-Path $path) { throw "Workbook snapshot already exists: $path" }
-    $SerializedData | Set-Content -Path $path -Encoding UTF8 -NoNewline
+
+    if ($null -eq $Resource) {
+        $SerializedData | Set-Content -Path $path -Encoding UTF8 -NoNewline
+        return $path
+    }
+
+    # Deep-copied so a later edit to the live object cannot reach back into the
+    # snapshot, which is the one thing here that has to stay exactly as read.
+    $copy = $Resource | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+    if ($copy.PSObject.Properties['properties'] -and $copy.properties) {
+        $copy.properties.serializedData = $SerializedData
+    }
+
+    [ordered]@{
+        '$snapshotSchema' = 2
+        capturedUtc       = (Get-Date).ToUniversalTime().ToString('o')
+        workbookId        = $WorkbookId
+        resource          = $copy
+    } | ConvertTo-Json -Depth 100 | Set-Content -Path $path -Encoding UTF8 -NoNewline
+
     return $path
 }
 
 function Get-WorkbookSnapshot {
     <#
     .SYNOPSIS
-        Reads a saved workbook serializedData snapshot.
+        Reads a saved workbook snapshot.
     .DESCRIPTION
-        Returns the exact snapshot string saved by Save-WorkbookSnapshot, or null
-        when the snapshot file is absent.
+        Returns the untouched serializedData string, whichever snapshot version
+        wrote the file. Version 1 files hold that string directly; version 2
+        wrap the whole ARM resource and it is read out of there.
+
+        Detection keys on '$snapshotSchema'. A version 1 file is itself a JSON
+        workbook document carrying '$schema', so the distinct name is what makes
+        the two unambiguous.
+
+        Returns null when the snapshot file is absent.
     .PARAMETER OutputPath
         Run output directory.
     .PARAMETER WorkbookId
         Workbook identifier used to derive the snapshot file name.
+    .PARAMETER AsResource
+        Return the full captured ARM resource instead of serializedData. Null
+        for a version 1 snapshot, which never held one.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$OutputPath,
-        [Parameter(Mandatory)][string]$WorkbookId
+        [Parameter(Mandatory)][string]$WorkbookId,
+        [switch]$AsResource
     )
     $path = Join-Path (Join-Path $OutputPath 'snapshots') (Get-SafeSnapshotName -WorkbookId $WorkbookId)
     if (-not (Test-Path $path)) { return $null }
-    return (Get-Content -Path $path -Raw -Encoding UTF8)
+
+    $raw = Get-Content -Path $path -Raw -Encoding UTF8
+
+    $envelope = $null
+    try { $envelope = $raw | ConvertFrom-Json }
+    catch {
+        # Not parseable as JSON at all. Version 1 held the serializedData string
+        # verbatim, so hand it back rather than failing the restore.
+        if ($AsResource) { return $null }
+        return $raw
+    }
+
+    $isV2 = $envelope -and
+            $envelope.PSObject.Properties['$snapshotSchema'] -and
+            $envelope.PSObject.Properties['resource']
+
+    if (-not $isV2) {
+        if ($AsResource) { return $null }
+        return $raw
+    }
+
+    if ($AsResource) { return $envelope.resource }
+    return [string]$envelope.resource.properties.serializedData
 }
 
 function Save-RawJson {

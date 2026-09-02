@@ -198,6 +198,29 @@ this scoping silently reverted by a later solution update.
 
 ## Known limitations
 
+**Nothing in this tool has been verified end to end against live Azure.** The
+offline test suite runs with the network stubbed and asserts on JSON the tool
+produced itself. It cannot observe how the Workbooks engine renders a scoped
+workbook, which is what actually decides whether the tool works. A green offline
+run is not verification, and reporting it as such is how this tool was signed off
+while returning no historical data in a customer tenant.
+
+`tests/Live.Azure.Tests.ps1` is the suite that can settle it: it runs the real
+tool against a real lab, reads the workbooks back out of ARM, and requires query
+results from **both** workspaces. It skips unless the lab variables are set. Run
+it before describing this tool as verified. See [Recovery](docs/recovery.md) if an
+environment is already affected.
+
+```powershell
+./tools/New-ScopeLab.ps1 -ResourceGroupName rg-wbscope-lab   # build a lab
+./tools/Show-VerificationStatus.ps1                          # VERIFIED / NOT VERIFIED
+```
+
+`Show-VerificationStatus.ps1` keys its verdict off the single assertion that
+proves the tool works, and will not report success from a skipped run — a
+distinction that is one character of Pester output and the whole difference
+between verified and not.
+
 **The self-healing behaviour has not been verified against live Azure.** Each
 mechanism it relies on is individually documented by Microsoft — `isGlobal`,
 `isHiddenWhenLocked`, an unset `isRequired`, and an empty parameter collapsing out of
@@ -227,6 +250,7 @@ workspace should also see it in Resource Graph, but confirm it with
 |---|---|
 | [Customer Guide](docs/customer-guide.md) | Setup, every parameter, expected behaviour, output files |
 | [Runbook](docs/runbook.md) | The step-by-step procedure, re-runs, rollback, CI/CD |
+| [Recovery](docs/recovery.md) | Workbooks show no historical data after a run — diagnosis and repair |
 | [Troubleshooting](docs/troubleshooting.md) | When something fails |
 | [Changelog](CHANGELOG.md) | What changed, including breaking changes |
 
@@ -246,15 +270,30 @@ Invoke-Pester -Path ./tests
 
 ### Test gate
 
-This repository has no remote configured yet. When it lands alongside the Sentinel
-Migration Assistant under the same Enterprise Managed User account, expect GitHub
-Actions not to run: Actions is disabled there by enterprise policy, and the API
-reports zero registered workflows and zero runs. `.github/workflows/tests.yml` is
-present and valid, and will start working unchanged in an organisation with Actions
-enabled.
+Two things this repository's tests do **not** do, stated plainly because
+assuming otherwise is what put a broken tool in front of a customer:
 
-Because nothing server-side is guaranteed to check the tests, the gate is local.
-Install it once per clone:
+- The offline suite runs with the network stubbed and asserts on JSON the tool
+  produced itself. It cannot observe how the Workbooks engine renders a scoped
+  workbook. Use `tests/Live.Azure.Tests.ps1` against a lab
+  (`tools/New-ScopeLab.ps1` builds one) for that.
+- The offline fixtures are hand-written, so they encode this tool's assumptions
+  about Azure rather than Azure's actual responses. `tools/Save-ArmFixture.ps1`
+  records real ones, and `tests/ArmContract.Tests.ps1` then checks the
+  assumptions against them. Both skip, loudly, until a recording exists.
+
+The repository is public at `TheMonitoringGuys/WorkbookMigrationTool`, and GitHub
+Actions **does** run there — `.github/workflows/tests.yml` is registered and has
+executed. An earlier version of this section said Actions was disabled by
+Enterprise Managed User policy; that was true of the private repo this started
+in and is no longer true here.
+
+Actions runs the offline suite, so the caveats above apply to it in full: a green
+check mark means the logic agrees with itself, not that the tool works against
+Azure.
+
+A local gate is still worth installing, because it catches failures before the
+push rather than after:
 
 ```powershell
 ./tools/Install-GitHooks.ps1

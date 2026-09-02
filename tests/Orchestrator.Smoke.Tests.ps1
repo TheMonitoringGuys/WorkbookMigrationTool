@@ -10,6 +10,11 @@
     API wrapper, so retry handling, URI construction, dry-run suppression and the
     whole module stack are exercised for real. Stubbing the wrapper itself would
     have hidden exactly the kind of wiring bug these tests exist to catch.
+
+    The PUT *body* is captured alongside the URI. It used to be discarded, which
+    meant every assertion here was about where the tool writes and none about what
+    it writes - a suite that stayed green while the tool sent anything at all to
+    Azure. 'PUT payload' below is the assertion set that closes that gap.
 #>
 
 BeforeAll {
@@ -25,6 +30,8 @@ BeforeAll {
 
         $outDir = Join-Path $work 'output'
         $capture = Join-Path $work 'puts.jsonl'
+        $bodyDir = Join-Path $work 'bodies'
+        New-Item -ItemType Directory -Path $bodyDir -Force | Out-Null
         $stdout = Join-Path $work 'stdout.txt'
         $stderr = Join-Path $work 'stderr.txt'
 
@@ -84,6 +91,7 @@ function Get-AzAccessToken {
 }
 
 `$global:Workbooks = $workbooksJson
+`$global:PutIndex = 0
 
 # The single network seam. Everything above it runs for real.
 function global:Invoke-RestMethod {
@@ -94,6 +102,11 @@ function global:Invoke-RestMethod {
 
     if (`$Method -eq 'PUT') {
         Add-Content -Path '$($capture -replace "'","''")' -Value (`$Uri) -Encoding UTF8
+        # The body is what Azure would actually receive. Capturing it is the only
+        # way a test here can tell a correct write from an empty one.
+        `$global:PutIndex++
+        `$bodyFile = Join-Path '$($bodyDir -replace "'","''")' ('put-{0:d3}.json' -f `$global:PutIndex)
+        Set-Content -Path `$bodyFile -Value `$Body -Encoding UTF8
         return [PSCustomObject]@{ id = `$Uri; name = 'stub' }
     }
 $sourceBranch
@@ -136,6 +149,8 @@ exit `$LASTEXITCODE
             Stdout   = if (Test-Path $stdout) { Get-Content $stdout -Raw } else { '' }
             Stderr   = if (Test-Path $stderr) { Get-Content $stderr -Raw } else { '' }
             Puts     = if (Test-Path $capture) { @(Get-Content $capture) } else { @() }
+            Bodies   = @(Get-ChildItem $bodyDir -Filter 'put-*.json' -ErrorAction SilentlyContinue |
+                    Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
             RunDir   = $runDir
             WorkDir  = $work
         }
@@ -239,6 +254,181 @@ Describe 'Execute' {
         $md | Should -Match 'Log Analytics Reader'
         $md | Should -Match 'ws-source'
         $md | Should -Match 'ws-dest'
+    }
+}
+
+Describe 'PUT payload' {
+    <#
+        What the tool sends to Azure, as opposed to where it sends it.
+
+        Every assertion in 'Execute' above passes if the tool PUTs an empty object
+        to the right URL. These do not. The tool was repeatedly reported as
+        verified while failing in the field, and this is the gap that allowed it:
+        a green suite that never once looked at the request body.
+    #>
+
+    BeforeAll {
+        $script:Run = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true }
+        $script:Bodies = @($script:Run.Bodies)
+
+        # A foreach over an empty collection passes every assertion inside it
+        # without evaluating one. That is the same failure this whole block
+        # exists to remove, so the bodies are fetched through a guard rather
+        # than read directly.
+        function Get-CapturedBody {
+            if (@($script:Bodies).Count -eq 0) {
+                throw 'No PUT bodies were captured, so the assertions in this test would pass without checking anything.'
+            }
+            return $script:Bodies
+        }
+    }
+
+    It 'captures one body per write' {
+        $script:Bodies.Count | Should -Be 16 -Because 'a body must be captured for every PUT, or the assertions below prove nothing'
+    }
+
+    It 'sends the ARM envelope the workbooks API requires' {
+        foreach ($b in (Get-CapturedBody)) {
+            $b.location | Should -Not -BeNullOrEmpty
+            $b.kind | Should -Not -BeNullOrEmpty
+            $b.properties | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'never sends read-only properties back' {
+        # timeModified, userId and revision are server-owned. Echoing them is
+        # rejected, and the failure reads as a permissions problem.
+        foreach ($b in (Get-CapturedBody)) {
+            foreach ($ro in @('timeModified', 'userId', 'revision')) {
+                $b.properties.PSObject.Properties.Name | Should -Not -Contain $ro
+            }
+        }
+    }
+
+    It 'sends serializedData as a JSON string, not an object' {
+        # The workbooks API takes the definition as a serialised string. Sending
+        # the parsed object silently produces a workbook that will not render.
+        foreach ($b in (Get-CapturedBody)) {
+            $b.properties.serializedData | Should -BeOfType [string]
+        }
+    }
+
+    It 'sends serializedData that parses back to a workbook document' {
+        foreach ($b in (Get-CapturedBody)) {
+            { $b.properties.serializedData | ConvertFrom-Json } | Should -Not -Throw
+            ($b.properties.serializedData | ConvertFrom-Json).items | Should -Not -BeNull
+        }
+    }
+
+    It 'preserves the destination sourceId so the workbook stays in the destination blade' {
+        # Changing sourceId moves the workbook out of the destination Sentinel
+        # blade. The tool documents that it never does this.
+        foreach ($b in (Get-CapturedBody)) {
+            $b.properties.sourceId | Should -Match '(?i)workspaces/ws-dest$'
+        }
+    }
+
+    It 'actually scopes the source workspace into every written workbook' {
+        # The point of the tool. This must look at real query scope, not at any
+        # occurrence of the workspace name in the document: the tool writes the
+        # source ID into its own $dualScope manifest, so a substring match over
+        # the whole payload stays green even when no query is scoped at all.
+        # That exact weakness was caught by mutation-testing this assertion.
+        function Get-ScopeReference {
+            param($Node)
+            if ($null -eq $Node) { return }
+            if ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string]) {
+                foreach ($child in $Node) { Get-ScopeReference -Node $child }
+                return
+            }
+            if ($Node -isnot [psobject]) { return }
+            foreach ($prop in $Node.PSObject.Properties) {
+                # The manifest is bookkeeping, not scope. Excluding it is the
+                # whole point of this walk.
+                if ($prop.Name -eq '$dualScope') { continue }
+                if ($prop.Name -in @('crossComponentResources', 'fallbackResourceIds')) {
+                    foreach ($v in @($prop.Value)) { [string]$v }
+                }
+                Get-ScopeReference -Node $prop.Value
+            }
+        }
+
+        foreach ($b in (Get-CapturedBody)) {
+            $doc = $b.properties.serializedData | ConvertFrom-Json
+            $refs = @(Get-ScopeReference -Node $doc)
+
+            $refs.Count | Should -BeGreaterThan 0 -Because "workbook '$($b.properties.displayName)' has no query scope at all"
+            @($refs | Where-Object { $_ -match '(?i)workspaces/ws-source$' }).Count |
+                Should -BeGreaterThan 0 -Because "workbook '$($b.properties.displayName)' was written with no query actually scoped to the source workspace, so it will render no historical data"
+        }
+    }
+
+    It 'records how the scope was applied, for every written workbook' {
+        # Scope reaches a workbook by one of three routes - per-query
+        # crossComponentResources, a patched picker, or fallbackResourceIds.
+        # The manifest is what makes revert and audit possible.
+        foreach ($b in (Get-CapturedBody)) {
+            $doc = $b.properties.serializedData | ConvertFrom-Json
+            $manifest = $doc.'$dualScope'
+            $manifest | Should -Not -BeNullOrEmpty -Because "workbook '$($b.properties.displayName)' must carry a scope manifest"
+            $manifest.scopeMode | Should -Be 'Literal'
+            @($manifest.changes).Count | Should -BeGreaterThan 0 -Because "workbook '$($b.properties.displayName)' reported success, so it must record at least one change"
+        }
+    }
+
+    It 'stamps the scope tags it uses to detect a prior run' {
+        foreach ($b in (Get-CapturedBody)) {
+            $b.tags.DualScopeSourceWorkspace | Should -Be 'ws-source'
+            $b.tags.DualScopeApplied | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'writes nothing at all in dry run' {
+        $dry = Invoke-Orchestrator -Parameters @{ DryRun = $true; SkipPreflight = $true }
+        @($dry.Bodies).Count | Should -Be 0
+    }
+
+    It 'never sends a null-valued property' {
+        # A null is not an absent key. storageUri null on a workbook backed by
+        # customer-owned storage asks ARM to unlink that storage. The GET returns
+        # these as null for the ordinary case, so they must be dropped.
+        foreach ($b in (Get-CapturedBody)) {
+            foreach ($p in $b.properties.PSObject.Properties) {
+                $p.Value | Should -Not -BeNullOrEmpty -Because "properties.$($p.Name) was sent as null on '$($b.properties.displayName)'"
+            }
+        }
+    }
+
+    It 'preserves an assigned managed identity instead of removing it' {
+        # A PUT replaces the resource. Dropping an assigned identity breaks a
+        # storage-backed workbook permanently while the run still reports
+        # success. Every workbook in the sample corpus is identity 'None', so
+        # this needs its own fixture to mean anything.
+        $work = Join-Path ([System.IO.Path]::GetTempPath()) "wbscope-ident-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $fixture = Join-Path $work 'workbooks.json'
+
+        $wbs = Get-Content $script:Fixture -Raw | ConvertFrom-Json
+        $one = $wbs | Select-Object -First 1
+        $one.identity = [PSCustomObject]@{
+            type                   = 'UserAssigned'
+            userAssignedIdentities = [PSCustomObject]@{
+                '/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dest/providers/Microsoft.ManagedIdentity/userAssignedIdentities/wb-mi' = [PSCustomObject]@{}
+            }
+        }
+        ,@($one) | ConvertTo-Json -Depth 100 | Set-Content $fixture -Encoding UTF8
+
+        $saved = $script:Fixture
+        try {
+            $script:Fixture = $fixture
+            $run = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true }
+            $body = @($run.Bodies)[0]
+
+            $body | Should -Not -BeNullOrEmpty -Because "the identity fixture should still produce a write; stdout was:`n$($run.Stdout)"
+            $body.identity | Should -Not -BeNullOrEmpty -Because 'dropping the identity silently breaks a storage-backed workbook'
+            $body.identity.type | Should -Be 'UserAssigned'
+        }
+        finally { $script:Fixture = $saved }
     }
 }
 
