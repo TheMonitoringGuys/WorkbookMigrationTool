@@ -166,6 +166,18 @@ record, and re-run:
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute
 ```
 
+If a run still reports workbooks as already scoped and you would rather not work out why,
+redo them all:
+
+```powershell
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -ForceRescope -DryRun
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -ForceRescope -Execute
+```
+
+`-ForceRescope` ignores the record entirely and rebuilds scope from what each workbook
+contains right now. Revert still works afterwards: the run merges its record with the
+earlier one, so the undo continues to target the workbook you started with.
+
 To see which workbooks are affected before upgrading:
 
 ```powershell

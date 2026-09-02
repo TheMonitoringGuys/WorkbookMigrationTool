@@ -5,6 +5,49 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses semantic versioning.
 
+## [1.2.8] - 2026-09-02
+
+### Added
+
+- **`-ForceRescope`.** Redoes the work on every workbook regardless of what an earlier run
+  recorded, for the case where a workbook has been left in an unknown state and reasoning
+  about how it got there is not worth the time.
+
+  A normal run skips a workbook whose own record says it is already scoped. That is right
+  almost always, and wrong in the case that matters: a workbook scoped once, then edited in
+  the portal or refreshed by a Content Hub solution, keeps the record while losing the
+  scope. 1.2.7 made the run verify the workbook rather than trust the record; this is the
+  blunt instrument for when that still is not enough.
+
+  ```powershell
+  ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -ForceRescope -DryRun
+  ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -ForceRescope -Execute
+  ```
+
+  Re-scoping now merges its record with the earlier one rather than replacing it, so revert
+  still restores the workbook the customer started with. Without that, two things went
+  wrong: the values recorded as "original" would have been partly this tool's own earlier
+  output, and any change from the first run that was still in force would have been dropped
+  from the undo because this run had no work to do on it. Verified byte-for-byte across
+  three workbook shapes - a query with literal scope, a query with none, and a
+  parameter-driven picker.
+
+- **The audit now checks the workspaces, not just the workbook JSON.** Scope written
+  correctly into a workbook still shows nothing if the source workspace does not exist at
+  the ID the run was given, cannot be read by this identity, or holds no data in the period
+  on screen. None of that is visible in the JSON, and all of it presents as "the tool says
+  it worked and the data is missing".
+
+  `tools/Test-WorkbookScope.ps1` now reports, before the workbook table: whether each
+  workspace resolves in ARM, how many tables it has received and when it last received
+  anything, and whether both can be read in a single query - the probe that mirrors what a
+  workbook actually does. When the source fails any of these it says plainly that
+  re-running the scope tool will not help.
+
+  A data-plane token failure is reported as a data check that could not run, rather than as
+  an unreadable workspace, because the Log Analytics audience is separate from ARM and some
+  tenants decline to issue it.
+
 ## [1.2.7] - 2026-09-02
 
 ### Fixed

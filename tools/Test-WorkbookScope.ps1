@@ -85,6 +85,133 @@ Write-Host "  destination : $WorkspaceName"
 Write-Host "  source      : $SourceWorkspaceName"
 Write-Host ''
 
+function Write-Check {
+    param([string]$Label, [string]$Value, [ValidateSet('ok', 'bad', 'info')][string]$State = 'info')
+    $mark = switch ($State) { 'ok' { '  OK  ' } 'bad' { ' FAIL ' } default { '      ' } }
+    $colour = switch ($State) { 'ok' { 'Green' } 'bad' { 'Red' } default { 'Gray' } }
+    Write-Host $mark -ForegroundColor $colour -NoNewline
+    Write-Host ("{0,-15}" -f $Label) -NoNewline
+    Write-Host $Value -ForegroundColor Cyan
+}
+
+# ── Workspaces ────────────────────────────────────────────────────────────────
+# The scope living in the JSON is only half the question. A workbook can name
+# both workspaces perfectly and still show nothing from the old one, because
+# what a query returns depends on things no amount of JSON inspection can see:
+# whether the source workspace exists at the ID the run was given, whether this
+# identity may read it, and whether it holds any data in the period on screen.
+#
+# Those are checked here, against the data plane, before the workbook table -
+# because if the source cannot be read there is no point studying scope at all.
+Write-Host 'Workspaces' -ForegroundColor White
+Write-Host ('-' * 100) -ForegroundColor DarkGray
+
+$laEndpoint = Resolve-LogAnalyticsEndpoint
+
+function Get-WorkspaceFacts {
+    param([string]$Sub, [string]$Rg, [string]$Name)
+    try {
+        $ws = Invoke-ScopeApi -Method GET -ThrottleDelayMs 50 -Uri (
+            Get-WorkspaceUriWithVersion -WorkspaceUri (
+                Get-ScopeWorkspaceUri -ArmEndpoint $arm -SubscriptionId $Sub -ResourceGroupName $Rg -WorkspaceName $Name))
+        return [PSCustomObject]@{ Found = $true; CustomerId = [string]$ws.properties.customerId; Error = $null }
+    }
+    catch {
+        return [PSCustomObject]@{ Found = $false; CustomerId = $null; Error = (Format-ApiErrorDetail -ErrorRecord $_) }
+    }
+}
+
+function Get-WorkspaceData {
+    param([string]$CustomerId)
+    # Usage is cheap and answers both questions at once: how many streams have
+    # arrived, and when the most recent one did.
+    $q = 'Usage | where TimeGenerated > ago(90d) | summarize Tables=dcount(DataType), Latest=max(TimeGenerated)'
+    try {
+        $r = Invoke-ScopeApi -Method POST -ThrottleDelayMs 50 -ResourceUrl $laEndpoint `
+            -Uri (Get-LogAnalyticsQueryUri -LogAnalyticsEndpoint $laEndpoint -WorkspaceId $CustomerId) `
+            -Body @{ query = $q }
+        $row = @($r.tables[0].rows)[0]
+        return [PSCustomObject]@{ Ok = $true; Tables = $row[0]; Latest = $row[1]; Error = $null }
+    }
+    catch {
+        return [PSCustomObject]@{ Ok = $false; Tables = 0; Latest = $null; Error = (Format-ApiErrorDetail -ErrorRecord $_) }
+    }
+}
+
+$destWs = Get-WorkspaceFacts -Sub $SubscriptionId -Rg $ResourceGroupName -Name $WorkspaceName
+$srcWs = Get-WorkspaceFacts -Sub $SourceSubscriptionId -Rg $SourceResourceGroupName -Name $SourceWorkspaceName
+
+$sourceUsable = $true
+foreach ($pair in @(
+        @{ Label = 'destination'; Name = $WorkspaceName; Facts = $destWs }
+        @{ Label = 'source'; Name = $SourceWorkspaceName; Facts = $srcWs })) {
+
+    if (-not $pair.Facts.Found) {
+        Write-Host ("  {0,-13} {1,-38} " -f $pair.Label, $pair.Name) -NoNewline
+        Write-Host 'NOT REACHABLE' -ForegroundColor Red
+        Write-Host "                $($pair.Facts.Error)" -ForegroundColor DarkGray
+        if ($pair.Label -eq 'source') { $sourceUsable = $false }
+        continue
+    }
+
+    $data = Get-WorkspaceData -CustomerId $pair.Facts.CustomerId
+    if (-not $data.Ok) {
+        # Failing to obtain a data-plane token is not the same as being unable to
+        # read the workspace. The Log Analytics data plane is a different audience
+        # from ARM and some tenants decline to issue it, which says nothing about
+        # the workspace itself. Reporting that as "cannot read" would send someone
+        # after a permissions problem that is not there.
+        $tokenTrouble = $data.Error -match '(?i)credential|token|authentication failed|AADSTS'
+        if ($tokenTrouble) {
+            Write-Check $pair.Label "$($pair.Name)  -  reachable; data check unavailable" 'info'
+            Write-Host "                could not get a Log Analytics token: $($data.Error)" -ForegroundColor DarkGray
+            continue
+        }
+
+        Write-Host ("  {0,-13} {1,-38} " -f $pair.Label, $pair.Name) -NoNewline
+        Write-Host 'CANNOT QUERY' -ForegroundColor Red
+        Write-Host "                $($data.Error)" -ForegroundColor DarkGray
+        if ($pair.Label -eq 'source') { $sourceUsable = $false }
+        continue
+    }
+
+    $latest = if ($data.Latest) { ([datetime]$data.Latest).ToString('u') } else { 'never' }
+    $state = if ([int]$data.Tables -gt 0) { 'ok' } else { 'bad' }
+    Write-Check $pair.Label "$($pair.Name)  -  $($data.Tables) table(s), last data $latest" $state
+    if ([int]$data.Tables -eq 0 -and $pair.Label -eq 'source') { $sourceUsable = $false }
+}
+
+# The probe that mirrors what a workbook actually does. Reading each workspace
+# on its own can succeed while the union fails, because the data plane checks
+# permission on every workspace named in the request.
+if ($destWs.Found -and $srcWs.Found) {
+    try {
+        $null = Invoke-ScopeApi -Method POST -ThrottleDelayMs 50 -ResourceUrl $laEndpoint `
+            -Uri (Get-LogAnalyticsQueryUri -LogAnalyticsEndpoint $laEndpoint -WorkspaceId $destWs.CustomerId) `
+            -Body @{ query = 'print probe = 1'; workspaces = @($srcId) }
+        Write-Check 'cross-workspace' 'both workspaces readable in one query' 'ok'
+    }
+    catch {
+        Write-Check 'cross-workspace' 'FAILED' 'bad'
+        Write-Host "                $(Format-ApiErrorDetail -ErrorRecord $_)" -ForegroundColor DarkGray
+        Write-Host '                This is what a workbook does. If it fails here it will fail there,' -ForegroundColor Yellow
+        Write-Host '                however the scope is written. Grant Log Analytics Reader on the' -ForegroundColor Yellow
+        Write-Host '                source workspace to everyone who views these workbooks.' -ForegroundColor Yellow
+        $sourceUsable = $false
+    }
+}
+
+if (-not $sourceUsable) {
+    Write-Host ''
+    Write-Host '  The source workspace cannot be read, or holds no data. Until that is' -ForegroundColor Yellow
+    Write-Host '  resolved the workbooks cannot show its data no matter how they are scoped,' -ForegroundColor Yellow
+    Write-Host '  and re-running the scope tool will not change that.' -ForegroundColor Yellow
+}
+
+Write-Host ''
+Write-Host 'Workbooks' -ForegroundColor White
+Write-Host ('-' * 100) -ForegroundColor DarkGray
+
 $listUri = Get-WorkbooksUri -ArmEndpoint $arm -SubscriptionId $SubscriptionId `
     -ResourceGroupName $ResourceGroupName -SourceId $destId -ExcludeContent
 $stubs = @(Invoke-ScopeApiList -Uri $listUri -ThrottleDelayMs 50)

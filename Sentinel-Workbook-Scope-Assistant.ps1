@@ -180,6 +180,16 @@ param(
     [switch]$IncludeAllWorkbooks,
     [string]$SnapshotPath,
 
+    # Redo the work regardless of what an earlier run recorded. Each workbook is
+    # re-examined and re-scoped from its current contents.
+    #
+    # An ordinary run skips a workbook whose own record says it is already
+    # scoped, which is right almost always and wrong in the case that matters:
+    # a workbook that was scoped, then edited in the portal or refreshed by a
+    # Content Hub solution, keeps the record while losing the scope. This is the
+    # way out of that without reasoning about what happened to each one.
+    [switch]$ForceRescope,
+
     [ValidateRange(0, 10)]
     [int]$RetryCount = -1,
 
@@ -194,7 +204,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:ToolVersion = '1.2.7'
+$script:ToolVersion = '1.2.8'
 
 # ── Module loading ────────────────────────────────────────────────────────────
 # Import-Module -Force removes a module before re-importing it, and every module
@@ -308,6 +318,9 @@ try {
     Write-Host "  Operation:    $operation ($mode)" -ForegroundColor $(if ($isDryRun) { 'Yellow' } else { 'Green' })
     if (-not $isRevert) {
         Write-Host "  Scope mode:   $($config.Options.ScopeMode)" -ForegroundColor White
+        if ($ForceRescope) {
+            Write-Host '  Re-scope:     forced - every workbook is redone regardless of its record' -ForegroundColor Yellow
+        }
     }
     Write-Host "  Source:       $($config.Source.WorkspaceName)" -ForegroundColor White
     Write-Host "  Destination:  $($config.Destination.WorkspaceName)" -ForegroundColor White
@@ -467,7 +480,8 @@ try {
                     -SourceWorkspaceId $sourceId -DestinationWorkspaceId $destId `
                     -ScopeMode $config.Options.ScopeMode `
                     -SourceSubscriptionId $config.Source.SubscriptionId `
-                    -DestinationSubscriptionId $config.Destination.SubscriptionId
+                    -DestinationSubscriptionId $config.Destination.SubscriptionId `
+                    -ForceRescope:$ForceRescope
 
                 $result.Action = $applied.Action
                 $result.Added = $applied.Stats.Added

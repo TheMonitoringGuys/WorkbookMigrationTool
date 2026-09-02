@@ -730,11 +730,17 @@ function Set-WorkbookDualScope {
         [ValidateSet('SelfHealing', 'Literal')]
         [string]$ScopeMode = 'Literal',
         [string]$SourceSubscriptionId,
-        [string]$DestinationSubscriptionId
+        [string]$DestinationSubscriptionId,
+        # Ignore the manifest entirely and rebuild scope from what the workbook
+        # contains right now. The escape hatch for a workbook left in an unknown
+        # state by an earlier run or an outside edit, where the record cannot be
+        # trusted and the operator would rather redo the work than reason about
+        # what happened.
+        [switch]$ForceRescope
     )
 
     $existing = Get-DualScopeManifest -Root $Root
-    if ($existing -and
+    if (-not $ForceRescope -and $existing -and
         [string]$existing['sourceWorkspaceId'] -ieq $SourceWorkspaceId -and
         [string]$existing['destinationWorkspaceId'] -ieq $DestinationWorkspaceId) {
         # A manifest written before scopeMode existed is treated as Literal, so an
@@ -881,6 +887,53 @@ function Set-WorkbookDualScope {
 
     if ($changes.Count -eq 0) {
         return [PSCustomObject]@{ Action = 'AlreadyScoped'; Changes = @(); Stats = $stats }
+    }
+
+    # Re-scoping a workbook that already carried a manifest has to produce a
+    # manifest describing the distance back to the ORIGINAL workbook, not back to
+    # whatever state this run happened to find.
+    #
+    # Two things go wrong without this. The values recorded as "original" would be
+    # partly this tool's own earlier output, so a revert would restore a scoped
+    # workbook rather than the untouched one. And any change the earlier run made
+    # that is still in force gets no entry at all this time - it needs no work, so
+    # nothing is recorded - which would quietly drop it from the undo.
+    #
+    # So the earlier manifest wins wherever it speaks, and its untouched entries
+    # are carried forward.
+    if ($existing) {
+        # added-ccr and replaced-ccr are the same act on the same node - one
+        # workbook's absent scope is another's single-workspace scope - so they
+        # share a key. Otherwise a path could end up with two conflicting undo
+        # instructions.
+        $keyOf = {
+            param($c)
+            $op = [string]$c['op']
+            if ($op -in @('added-ccr', 'replaced-ccr')) { return "ccr|$([string]$c['path'])" }
+            return "$op|$([string]$c['path'])"
+        }
+
+        $priorByKey = [ordered]@{}
+        foreach ($c in @(ConvertTo-SafeArray $existing['changes'])) {
+            if ($c -isnot [System.Collections.IDictionary]) { continue }
+            $k = & $keyOf $c
+            if (-not $priorByKey.Contains($k)) { $priorByKey[$k] = $c }
+        }
+
+        $merged = [System.Collections.Generic.List[object]]::new()
+        $usedKeys = [System.Collections.Generic.HashSet[string]]::new()
+
+        foreach ($c in $changes) {
+            $k = & $keyOf $c
+            [void]$usedKeys.Add($k)
+            if ($priorByKey.Contains($k)) { $merged.Add($priorByKey[$k]) }
+            else { $merged.Add($c) }
+        }
+        foreach ($k in @($priorByKey.Keys)) {
+            if (-not $usedKeys.Contains($k)) { $merged.Add($priorByKey[$k]) }
+        }
+
+        $changes = $merged
     }
 
     Set-DualScopeManifest -Root $Root -Manifest (New-DualScopeManifest `
