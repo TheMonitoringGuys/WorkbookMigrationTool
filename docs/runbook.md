@@ -129,7 +129,12 @@ What you do here depends on the scope mode the workbooks were written in. The re
 from the scoping run states it, and so does the `scopeMode` field in each workbook's
 `$dualScope` manifest.
 
-### Self-healing mode (the default)
+### Self-healing mode (opt-in: `-ScopeMode SelfHealing`)
+
+This applies **only** if the run was made with `-ScopeMode SelfHealing`. It is not the
+default. If you did not pass that flag, read [Literal mode](#literal-mode-the-default)
+below instead — deleting the source workspace without reverting will break every
+scoped tile.
 
 There is no ordering constraint. The workbooks reference the source workspace through
 a parameter backed by Azure Resource Graph, which stops returning the workspace once
@@ -153,7 +158,9 @@ disposable source workspace and open a scoped workbook. The self-healing path is
 built on documented Azure behaviour but has not been verified end to end against a
 live tenant.
 
-### Literal mode
+### Literal mode (the default)
+
+This is what you get unless you explicitly passed `-ScopeMode SelfHealing`.
 
 Reverting **is** mandatory, and it must happen before the source workspace is
 deleted. A workbook still holding a literal reference to a deleted workspace returns

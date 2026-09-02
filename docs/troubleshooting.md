@@ -288,8 +288,10 @@ reads nothing from it.
 Preflight reports the unreachable source as an expected warning in revert mode rather
 than failing the run, so `-SkipPreflight` is not needed.
 
-To avoid this next time, use the default `SelfHealing` mode, where the reference
-disappears on its own when the workspace does.
+To avoid this next time, either revert before decommissioning (required in the default
+`Literal` mode), or opt in to `-ScopeMode SelfHealing`, where the reference disappears
+on its own when the workspace does. Self-healing is not the default, and it requires
+every viewer to have Reader on the source subscription.
 
 ### "No workbooks matched"
 
