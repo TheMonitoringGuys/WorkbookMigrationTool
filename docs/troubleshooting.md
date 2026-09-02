@@ -181,11 +181,11 @@ earlier one, so the undo continues to target the workbook you started with.
 To see which workbooks are affected before upgrading:
 
 ```powershell
-./tools/Test-WorkbookScope.ps1 `
-    -SubscriptionId <destination-sub> `
-    -ResourceGroupName <destination-rg> `
-    -WorkspaceName <destination-workspace> `
-    -SourceWorkspaceName <old-workspace>
+./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
+```
+
+```powershell
+./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
 ```
 
 Any workbook listed with `PROCESSED = yes` and a verdict of `PARTIAL` or `NOT SCOPED` is in
@@ -206,11 +206,7 @@ versions only reported a count, along the lines of `Found 3 migrated workbook(s)
 **Check which workbooks are actually scoped:**
 
 ```powershell
-./tools/Test-WorkbookScope.ps1 `
-    -SubscriptionId <destination-sub> `
-    -ResourceGroupName <destination-rg> `
-    -WorkspaceName <destination-workspace> `
-    -SourceWorkspaceName <old-workspace>
+./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
 ```
 
 It reads every workbook and resolves each query by the route it actually uses -

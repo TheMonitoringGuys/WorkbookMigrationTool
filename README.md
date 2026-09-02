@@ -53,6 +53,12 @@ Copy-Item ./samples/config.yaml ./config.yaml    # then edit it
 # 4. Validate data-plane access and table coverage
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Execute -ValidateQueries
 
+# Confirm the result, and diagnose it if the old workspace's data is missing
+./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
+
+# If a run reports workbooks as already scoped but they are not, redo them all
+./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -ForceRescope -Execute
+
 # 5. Later, when the source workspace is decommissioned - optional tidy-up
 ./Sentinel-Workbook-Scope-Assistant.ps1 -ConfigFile ./config.yaml -Revert -Execute
 ```
@@ -127,6 +133,31 @@ A measured 16-workbook migration held 533 Log Analytics queries: 290 had no expl
 scope, 243 were parameter-driven, and none hardcoded a workspace ID or used the
 `workspace()` KQL function. All 523 eligible queries were verified offline to keep a
 usable destination scope after simulating deletion of the source workspace.
+
+## Diagnostics
+
+Two read-only scripts, for when a run reports success and the dashboards disagree.
+Both accept the same config file the tool uses, so nothing has to be retyped.
+
+```powershell
+# Is each workbook actually reading both workspaces, and can the old one be read at all?
+./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
+
+# Can this machine authenticate to Azure and list workbooks?
+./tools/Test-ScopeConnection.ps1 -SubscriptionId <sub> -ResourceGroupName <rg> -WorkspaceName <ws>
+```
+
+`Test-WorkbookScope.ps1` checks both workspaces before it looks at any workbook -
+whether each resolves in ARM, when it last received data, and whether both can be read
+in one query. Scope written perfectly into a workbook still shows nothing if the source
+workspace does not exist at the ID the run was given, cannot be read by the viewer, or
+holds no data in the period on screen. None of that is visible in the workbook itself,
+and all of it looks the same from the outside.
+
+It then reports each workbook as `OK`, `PARTIAL` or `NOT SCOPED`, resolving every query
+by the route it actually uses rather than assuming they all work the same way.
+
+Neither script writes anything, and neither prints any token material.
 
 ## What it will not do
 

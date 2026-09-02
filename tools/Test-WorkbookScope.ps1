@@ -43,19 +43,33 @@
 .PARAMETER SourceResourceGroupName
     Resource group of the old workspace. Defaults to the destination's.
 
+.PARAMETER ConfigFile
+    The same config.yaml or config.json the scope tool uses. Both workspaces are
+    read from it, so the audit examines exactly what a run would.
+
+    Prefer this over typing the six values by hand. A mistyped source workspace is
+    one of the faults this audit exists to find, and retyping it here is a good
+    way to introduce a different one.
+
+.EXAMPLE
+    ./tools/Test-WorkbookScope.ps1 -ConfigFile ./config.yaml
+
 .EXAMPLE
     ./tools/Test-WorkbookScope.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 `
         -ResourceGroupName my-rg -WorkspaceName new-workspace -SourceWorkspaceName old-workspace
 #>
 #Requires -Version 7.0
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Config')]
 param(
-    [Parameter(Mandatory)][string]$SubscriptionId,
-    [Parameter(Mandatory)][string]$ResourceGroupName,
-    [Parameter(Mandatory)][string]$WorkspaceName,
-    [Parameter(Mandatory)][string]$SourceWorkspaceName,
-    [string]$SourceSubscriptionId,
-    [string]$SourceResourceGroupName
+    [Parameter(Mandatory, ParameterSetName = 'Config')]
+    [string]$ConfigFile,
+
+    [Parameter(Mandatory, ParameterSetName = 'Explicit')][string]$SubscriptionId,
+    [Parameter(Mandatory, ParameterSetName = 'Explicit')][string]$ResourceGroupName,
+    [Parameter(Mandatory, ParameterSetName = 'Explicit')][string]$WorkspaceName,
+    [Parameter(Mandatory, ParameterSetName = 'Explicit')][string]$SourceWorkspaceName,
+    [Parameter(ParameterSetName = 'Explicit')][string]$SourceSubscriptionId,
+    [Parameter(ParameterSetName = 'Explicit')][string]$SourceResourceGroupName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,8 +81,30 @@ $srcDir = Join-Path $root 'src'
 # the Api and Engine copies this script already had. Re-importing the base
 # modules at the tail, deepest-first, rebinds them into this scope - the same
 # order the orchestrator uses, and for the same reason.
-foreach ($m in @('Discovery', 'Engine', 'Api', 'Common')) {
+foreach ($m in @('Config', 'Discovery', 'Engine', 'Api', 'Common')) {
     Import-Module (Join-Path $srcDir "WorkbookScope.$m.psm1") -Force -DisableNameChecking
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'Config') {
+    if (-not (Test-Path $ConfigFile)) { throw "Config file not found: $ConfigFile" }
+    $cfg = ConvertTo-NormalizedConfig -RawConfig (Read-ScopeConfig -Path $ConfigFile)
+
+    $SubscriptionId = $cfg.Destination.SubscriptionId
+    $ResourceGroupName = $cfg.Destination.ResourceGroupName
+    $WorkspaceName = $cfg.Destination.WorkspaceName
+    $SourceSubscriptionId = $cfg.Source.SubscriptionId
+    $SourceResourceGroupName = $cfg.Source.ResourceGroupName
+    $SourceWorkspaceName = $cfg.Source.WorkspaceName
+
+    foreach ($pair in @(
+            @{ N = 'destination.subscriptionId'; V = $SubscriptionId }
+            @{ N = 'destination.resourceGroupName'; V = $ResourceGroupName }
+            @{ N = 'destination.workspaceName'; V = $WorkspaceName }
+            @{ N = 'source.subscriptionId'; V = $SourceSubscriptionId }
+            @{ N = 'source.resourceGroupName'; V = $SourceResourceGroupName }
+            @{ N = 'source.workspaceName'; V = $SourceWorkspaceName })) {
+        if ([string]::IsNullOrWhiteSpace($pair.V)) { throw "Config file is missing $($pair.N)." }
+    }
 }
 
 if (-not $SourceSubscriptionId) { $SourceSubscriptionId = $SubscriptionId }
@@ -81,8 +117,13 @@ $srcId = Get-WorkspaceResourceId -SubscriptionId $SourceSubscriptionId -Resource
 Write-Host ''
 Write-Host 'Workbook scope audit' -ForegroundColor White
 Write-Host ('-' * 100) -ForegroundColor DarkGray
-Write-Host "  destination : $WorkspaceName"
-Write-Host "  source      : $SourceWorkspaceName"
+# Print the fully resolved identities, not just the names. A source that names the
+# wrong resource group or subscription is one of the faults this looks for, and it
+# is invisible if only the workspace name is shown.
+Write-Host "  destination : $WorkspaceName" -ForegroundColor White
+Write-Host "                $destId" -ForegroundColor DarkGray
+Write-Host "  source      : $SourceWorkspaceName" -ForegroundColor White
+Write-Host "                $srcId" -ForegroundColor DarkGray
 Write-Host ''
 
 function Write-Check {
