@@ -264,10 +264,28 @@ their count is greater than zero, so a run never shows one that does not apply.
 |---|---|
 | Parameters patched | A workspace picker the tool actually rewrote to name both workspaces. Literal mode only. |
 | Scoped via existing picker | A query that kept its own picker untouched and had the self-healing scope reference appended beside it. Self-healing mode only. |
+| Scoped on weak evidence | Workbooks reporting success where the scope did **not** reach any query directly. Shown only when it applies. |
 
 The distinction matters because self-healing deliberately leaves the customer's
 picker alone. An earlier version counted both as "parameters patched", so a run
 reported having patched 237 parameters while every picker was byte-identical.
+
+### Scope evidence
+
+`Scoped` covers routes of very different strength, and reporting them
+identically is how a run can look completely clean while a workbook returns no
+historical data. Each scoped workbook now carries an evidence label:
+
+| Evidence | Meaning |
+|---|---|
+| `Per-query` | Queries name the source workspace directly. Strongest. |
+| `Picker` | A workspace picker carries the source. Real, but depends on the picker resolving at render time for the viewer. |
+| `Fallback only` | **Only** the workbook-level `fallbackResourceIds` was extended. Any query carrying its own scope ignores it. |
+| `None` | Nothing changed, yet the action claims otherwise. |
+
+Anything other than `Per-query` or `Picker` is listed by name under *Workbooks
+scoped on weak evidence* in the report. Check those first when historical data
+is missing.
 
 ### Decommission readiness
 

@@ -132,6 +132,54 @@ function New-ScopeReportTable {
     return $sb.ToString()
 }
 
+function Get-ScopeEvidence {
+    <#
+    .SYNOPSIS
+        Classifies how strongly a result supports the claim that it is scoped.
+    .DESCRIPTION
+        'Scoped' is one word covering routes of very different strength, and the
+        report used to present them identically. A workbook whose queries each
+        carry the source workspace is a different claim from one where only the
+        workbook-level fallback was extended - the latter is silently overridden
+        by any query that carries its own scope.
+
+        Reporting them the same way is how a run can look completely clean while
+        a workbook returns no historical data.
+
+          Per-query     queries now name the source directly. Strongest.
+          Picker        a workspace picker was patched, or the injected
+                        reference was appended beside the customer's own. Real,
+                        but it depends on the picker resolving at render time.
+          Fallback only ONLY the workbook default was extended. Weakest: any
+                        query carrying its own scope ignores it.
+          None          nothing changed, yet the action claims otherwise.
+    .OUTPUTS
+        Hashtable with Label, Tone ('good'|'warn'|'bad') and Detail.
+    #>
+    [CmdletBinding()]
+    param([object]$Result)
+
+    $added = [int](Get-ScopeProp $Result 'Added' 0)
+    $replaced = [int](Get-ScopeProp $Result 'Replaced' 0)
+    $patched = [int](Get-ScopeProp $Result 'ParametersPatched' 0)
+    $viaPicker = [int](Get-ScopeProp $Result 'ScopedViaPicker' 0)
+    $fallback = Get-ScopeProp $Result 'FallbackUpdated' $false
+
+    $perQuery = $added + $replaced
+    $pickerWork = $patched + $viaPicker
+
+    if ($perQuery -gt 0) {
+        return @{ Label = 'Per-query'; Tone = 'good'; Detail = "$perQuery quer(y/ies) now name the source workspace directly." }
+    }
+    if ($pickerWork -gt 0) {
+        return @{ Label = 'Picker'; Tone = 'good'; Detail = "$pickerWork parameter(s) carry the source workspace. Confirm the picker resolves for viewers." }
+    }
+    if ($fallback) {
+        return @{ Label = 'Fallback only'; Tone = 'warn'; Detail = 'Only the workbook-level default was extended. Any query carrying its own scope ignores it.' }
+    }
+    return @{ Label = 'None'; Tone = 'bad'; Detail = 'No scope change was recorded, so this workbook has no evidence of being scoped.' }
+}
+
 function Get-ScopeKpis {
     param([object]$RunResult)
     $results = @(ConvertTo-ItemList (Get-ScopeProp $RunResult 'Results'))
@@ -155,6 +203,16 @@ function Get-ScopeKpis {
     }
     if ($parametersPatched -gt 0) { $kpis['Parameters patched'] = $parametersPatched }
     if ($scopedViaPicker -gt 0) { $kpis['Scoped via existing picker'] = $scopedViaPicker }
+
+    # Surfaced only when it applies, and only for workbooks claiming to be
+    # scoped. A count here means some workbook's clean-looking result rests on
+    # the weakest available evidence.
+    $weak = @($results | Where-Object {
+            (Get-NormalizedAction $_.Action) -in @('Scoped', 'AlreadyScoped') -and
+            (Get-ScopeEvidence -Result $_).Tone -ne 'good'
+        }).Count
+    if ($weak -gt 0) { $kpis['Scoped on weak evidence'] = $weak }
+
     $kpis['Collected errors'] = @($errors).Count
     return $kpis
 }
@@ -319,10 +377,32 @@ function New-ScopeReportContent {
     [void]$sb.AppendLine('')
     $wbRows = [System.Collections.Generic.List[object[]]]::new()
     foreach ($r in $results) {
-        $wbRows.Add(@($r.DisplayName, (Format-ActionLabel $r.Action), $r.Eligible, $r.Added, $r.Replaced, (Get-ScopeProp $r 'ParametersPatched' 0), (Get-ScopeProp $r 'ScopedViaPicker' 0), $r.Reason)) | Out-Null
+        $evidence = if ((Get-NormalizedAction $r.Action) -in @('Scoped', 'AlreadyScoped')) {
+            (Get-ScopeEvidence -Result $r).Label
+        } else { '' }
+        $wbRows.Add(@($r.DisplayName, (Format-ActionLabel $r.Action), $evidence, $r.Eligible, $r.Added, $r.Replaced, (Get-ScopeProp $r 'ParametersPatched' 0), (Get-ScopeProp $r 'ScopedViaPicker' 0), $r.Reason)) | Out-Null
     }
     if ($wbRows.Count -gt 0) {
-        [void]$sb.AppendLine((New-ScopeReportTable -Header @('Workbook', $actionHeader, 'Eligible', 'Added', 'Replaced', 'Parameters patched', 'Scoped via existing picker', 'Reason') -Row $wbRows))
+        [void]$sb.AppendLine((New-ScopeReportTable -Header @('Workbook', $actionHeader, 'Evidence', 'Eligible', 'Added', 'Replaced', 'Parameters patched', 'Scoped via existing picker', 'Reason') -Row $wbRows))
+
+        # Named individually, because "3 workbooks on weak evidence" is not
+        # actionable and this is the report someone reads when the dashboards
+        # disagree with the run.
+        $weakRows = @($results | Where-Object {
+                (Get-NormalizedAction $_.Action) -in @('Scoped', 'AlreadyScoped') -and
+                (Get-ScopeEvidence -Result $_).Tone -ne 'good'
+            })
+        if ($weakRows.Count -gt 0) {
+            [void]$sb.AppendLine('### Workbooks scoped on weak evidence')
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('These report success, but not by the strongest route. Check them first if historical data is missing.')
+            [void]$sb.AppendLine('')
+            foreach ($r in $weakRows) {
+                $e = Get-ScopeEvidence -Result $r
+                [void]$sb.AppendLine("- **$(Format-ScopeReportInline $r.DisplayName)** — $($e.Label): $(Format-ScopeReportInline $e.Detail)")
+            }
+            [void]$sb.AppendLine('')
+        }
     }
     else {
         [void]$sb.AppendLine('No workbook results were recorded.')
@@ -433,4 +513,8 @@ function New-ScopeReport {
 
 Export-ModuleMember -Function @(
     'New-ScopeReport'
+    # Exported so the classification can be tested directly. It is duplicated in
+    # WorkbookScope.Html.psm1, and Html.Tests.ps1 asserts the same cases, so the
+    # two cannot drift silently.
+    'Get-ScopeEvidence'
 )

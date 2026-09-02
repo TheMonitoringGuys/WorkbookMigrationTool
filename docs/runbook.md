@@ -27,6 +27,9 @@ Review the run folder under `output/`:
 - Confirm the source and destination workspace names and resource IDs.
 - Check the number of discovered workbooks.
 - Check the eligible and ineligible query counts.
+- **Check `Scoped on weak evidence`.** If it appears, some workbook reports
+  success without the scope reaching any of its queries. The report names those
+  workbooks; treat them as suspect before rollout, not after the support call.
 - Read the preflight warnings. Cross-subscription and cross-region warnings are not
   failures, but they change what users should expect.
 - Confirm that no unexpected workbook names are in scope.

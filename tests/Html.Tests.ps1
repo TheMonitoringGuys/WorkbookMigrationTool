@@ -20,6 +20,7 @@ BeforeAll {
             [Nullable[int]]$ScopedViaPicker = 0,
             [string]$Reason = '',
             [string]$Method = 'Manifest',
+            [switch]$FallbackUpdated,
             [switch]$OmitScopedViaPicker,
             [switch]$Minimal
         )
@@ -37,7 +38,7 @@ BeforeAll {
             Added             = $Added
             Replaced          = $Replaced
             ParametersPatched = $ParametersPatched
-            FallbackUpdated   = $false
+            FallbackUpdated   = [bool]$FallbackUpdated
             ParameterNames    = @()
             SnapshotPath      = ''
             Reason            = $Reason
@@ -256,6 +257,62 @@ Describe 'HTML renderer robustness' {
         $html = New-HtmlText -RunResult (New-TestRunResult -Results @(New-WorkbookResult))
 
         $html | Should -Not -Match '\$(sourceName|destName|scoped|reverted|RunResult)\b'
+    }
+}
+
+Describe 'HTML scope evidence' {
+    <#
+        The HTML summary is what the runbook tells people to open first, so a
+        workbook resting on the weakest evidence has to be visible here and not
+        only in the Markdown report.
+
+        Get-ScopeEvidence is deliberately duplicated in Html and Report, matching
+        this module's existing arrangement for Get-ScopeKpis. The last test below
+        pins the two together: a change to one without the other fails.
+    #>
+
+    It 'shows the weak-evidence KPI when a workbook rests on the fallback alone' {
+        $html = New-HtmlText -RunResult (New-TestRunResult -Results @(
+                (New-WorkbookResult -DisplayName 'all devices' -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0 -FallbackUpdated)
+            ))
+
+        $html | Should -Match 'Scoped on weak evidence'
+    }
+
+    It 'omits the weak-evidence KPI when every workbook is strongly scoped' {
+        $html = New-HtmlText -RunResult (New-TestRunResult -Results @((New-WorkbookResult -Added 4)))
+
+        $html | Should -Not -Match 'Scoped on weak evidence'
+    }
+
+    It 'puts the evidence label in the workbook detail table' {
+        $html = New-HtmlText -RunResult (New-TestRunResult -Results @((New-WorkbookResult -Added 4)))
+
+        $html | Should -Match 'Evidence'
+        $html | Should -Match 'Per-query'
+    }
+
+    It 'classifies identically to the report module' {
+        # The two implementations are separate on purpose; this is what stops
+        # them diverging into two different definitions of "scoped".
+        $reportModule = Join-Path $script:RepoRoot 'src\WorkbookScope.Report.psm1'
+        Import-Module $reportModule -Force -DisableNameChecking
+
+        $cases = @(
+            (New-WorkbookResult -Added 3 -Replaced 1)
+            (New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 2)
+            (New-WorkbookResult -Added 0 -Replaced 0 -ScopedViaPicker 4)
+            (New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0 -FallbackUpdated)
+            (New-WorkbookResult -Added 0 -Replaced 0 -ParametersPatched 0 -ScopedViaPicker 0)
+        )
+
+        foreach ($c in $cases) {
+            $fromHtml = & (Get-Module WorkbookScope.Html) { param($r) Get-ScopeEvidence -Result $r } $c
+            $fromReport = & (Get-Module WorkbookScope.Report) { param($r) Get-ScopeEvidence -Result $r } $c
+
+            $fromHtml.Label | Should -Be $fromReport.Label -Because 'the duplicated classifiers must agree'
+            $fromHtml.Tone | Should -Be $fromReport.Tone -Because 'the duplicated classifiers must agree'
+        }
     }
 }
 
