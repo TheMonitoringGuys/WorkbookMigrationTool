@@ -447,8 +447,10 @@ try {
 
             # Snapshot before the first edit - this is the authoritative restore
             # source, so it must exist even if everything after this point fails.
+            # The whole resource is captured, not just serializedData: a PUT
+            # replaces the resource, so tags and kind need restoring too.
             $result.SnapshotPath = Save-WorkbookSnapshot -OutputPath $outputPath `
-                -WorkbookId $wb.name -SerializedData $serialized
+                -WorkbookId $wb.name -SerializedData $serialized -Resource $wb
 
             $root = ConvertFrom-SerializedWorkbook -Json $serialized
             $summary = Get-WorkbookScopeSummary -Root $root
@@ -460,13 +462,18 @@ try {
                 # A snapshot from the run that applied the scope beats the
                 # embedded manifest: it is the exact original, not a replay.
                 $restored = $null
+                $restoredResource = $null
                 if ($SnapshotPath) {
                     $restored = Get-WorkbookSnapshot -OutputPath $SnapshotPath -WorkbookId $wb.name
+                    # Null for a version 1 snapshot, which held serializedData
+                    # only. The scope still reverts; the resource-level fields
+                    # simply cannot be restored from it.
+                    $restoredResource = Get-WorkbookSnapshot -OutputPath $SnapshotPath -WorkbookId $wb.name -AsResource
                 }
                 if ($restored) {
                     $newSerialized = $restored
                     $result.Action = 'Reverted'
-                    $result.Method = 'Snapshot'
+                    $result.Method = if ($restoredResource) { 'Snapshot' } else { 'Snapshot (content only)' }
                 }
                 else {
                     $rev = Restore-WorkbookScope -Root $root -SourceWorkspaceId $sourceId
@@ -509,6 +516,15 @@ try {
 
             $tags = Get-WorkbookScopeTag -ExistingTags $wb.tags `
                 -SourceWorkspaceName $config.Source.WorkspaceName -Revert:$isRevert
+
+            # Restoring from a full snapshot means restoring the tags as they
+            # were read, not the live ones with this tool's two removed. Anything
+            # else added to the workbook since the run would otherwise survive a
+            # "restore to the exact original".
+            if ($isRevert -and $restoredResource -and $restoredResource.PSObject.Properties['tags']) {
+                $tags = Get-WorkbookScopeTag -ExistingTags $restoredResource.tags `
+                    -SourceWorkspaceName $config.Source.WorkspaceName -Revert
+            }
 
             $props = $wb.properties | ConvertTo-Json -Depth 100 | ConvertFrom-Json
             $props.serializedData = $newSerialized

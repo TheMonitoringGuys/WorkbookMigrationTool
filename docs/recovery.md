@@ -87,10 +87,12 @@ The `output/scope-*` folder from the run that applied the scope contains
 `snapshots/`, which is the cleanest rollback source. Find it before changing
 anything.
 
-Note its limitation: **a snapshot holds the workbook content, not the whole ARM
-resource.** It restores `serializedData`. It does not restore resource-level
-fields such as tags. That is enough to undo a bad scope, and not enough to undo
-everything a run touched.
+Note which snapshot format you have. Snapshots written **before this fix** hold
+the workbook content only: they restore `serializedData`, not resource-level
+fields such as tags. Snapshots written by the current version capture the whole
+ARM resource, and revert restores the tags with it. Both are read correctly —
+the report's `Method` column says `Snapshot` for a full restore and
+`Snapshot (content only)` for the older format, so you can tell which you got.
 
 ### 4b. Revert to a known-good state
 

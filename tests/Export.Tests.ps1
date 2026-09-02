@@ -61,6 +61,85 @@ Describe 'Workbook snapshots' {
     It 'returns null for an unknown snapshot id' {
         Get-WorkbookSnapshot -OutputPath (Join-Path $script:TempDir 'missing') -WorkbookId 'unknown' | Should -BeNullOrEmpty
     }
+
+    Context 'Version 2 - full resource capture' {
+        <#
+            A PUT replaces the resource, so a snapshot holding only
+            serializedData cannot restore what a run overwrote at resource
+            level. Version 2 captures the resource as read.
+
+            Version 1 files must keep working regardless: existing run folders
+            are the customer's rollback source, and docs/recovery.md sends them
+            there.
+        #>
+
+        BeforeAll {
+            $script:Serialized = '{"version":"Notebook/1.0","items":[],"$schema":"https://example/workbook.json"}'
+            $script:Resource = [PSCustomObject]@{
+                name       = 'wb-v2'
+                location   = 'eastus'
+                kind       = 'shared'
+                etag       = '"abc123"'
+                identity   = [PSCustomObject]@{ type = 'UserAssigned' }
+                tags       = [PSCustomObject]@{ MigratedFromWorkbookId = 'src-1'; 'hidden-title' = 'Lab' }
+                properties = [PSCustomObject]@{
+                    displayName    = 'Lab'
+                    serializedData = $script:Serialized
+                    category       = 'sentinel'
+                }
+            }
+        }
+
+        It 'captures the resource-level fields a content-only snapshot loses' {
+            $out = Join-Path $script:TempDir 'snap-v2'
+            $null = Save-WorkbookSnapshot -OutputPath $out -WorkbookId 'wb-v2' `
+                -SerializedData $script:Serialized -Resource $script:Resource
+
+            $res = Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'wb-v2' -AsResource
+            $res | Should -Not -BeNullOrEmpty
+            $res.tags.MigratedFromWorkbookId | Should -Be 'src-1'
+            $res.kind | Should -Be 'shared'
+            $res.identity.type | Should -Be 'UserAssigned'
+            $res.etag | Should -Be '"abc123"'
+        }
+
+        It 'still returns serializedData by default, so existing callers are unchanged' {
+            $out = Join-Path $script:TempDir 'snap-v2-default'
+            $null = Save-WorkbookSnapshot -OutputPath $out -WorkbookId 'wb-v2' `
+                -SerializedData $script:Serialized -Resource $script:Resource
+
+            Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'wb-v2' | Should -BeExactly $script:Serialized
+        }
+
+        It 'reads a version 1 snapshot written by an earlier release' {
+            # Written the way the previous version wrote it: the bare string.
+            $out = Join-Path $script:TempDir 'snap-v1-compat'
+            $dir = Join-Path $out 'snapshots'
+            New-Item -Path $dir -ItemType Directory -Force | Out-Null
+            $script:Serialized | Set-Content -Path (Join-Path $dir 'legacy.json') -Encoding UTF8 -NoNewline
+
+            Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'legacy' | Should -BeExactly $script:Serialized
+        }
+
+        It 'reports no resource for a version 1 snapshot rather than inventing one' {
+            $out = Join-Path $script:TempDir 'snap-v1-resource'
+            $dir = Join-Path $out 'snapshots'
+            New-Item -Path $dir -ItemType Directory -Force | Out-Null
+            $script:Serialized | Set-Content -Path (Join-Path $dir 'legacy2.json') -Encoding UTF8 -NoNewline
+
+            Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'legacy2' -AsResource | Should -BeNullOrEmpty
+        }
+
+        It 'survives a snapshot file that is not JSON at all' {
+            $out = Join-Path $script:TempDir 'snap-garbage'
+            $dir = Join-Path $out 'snapshots'
+            New-Item -Path $dir -ItemType Directory -Force | Out-Null
+            'not json {' | Set-Content -Path (Join-Path $dir 'broken.json') -Encoding UTF8 -NoNewline
+
+            Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'broken' | Should -BeExactly 'not json {'
+            Get-WorkbookSnapshot -OutputPath $out -WorkbookId 'broken' -AsResource | Should -BeNullOrEmpty
+        }
+    }
 }
 
 Describe 'Raw JSON export' {
