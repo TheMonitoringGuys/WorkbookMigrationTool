@@ -181,3 +181,28 @@ Being explicit, because over-claiming here is what caused the original problem.
   results from **both** workspaces. It skips unless a lab is configured.
 - Until that suite has been run green against a lab, the correct statement about
   this tool is that its logic is tested and its behaviour against Azure is not.
+
+To get a straight answer rather than reading Pester output:
+
+```powershell
+./tools/Show-VerificationStatus.ps1
+```
+
+It prints `VERIFIED` or `NOT VERIFIED`, keyed off the single assertion that
+proves the tool works. It will not report success from a skipped run.
+
+Build a disposable lab first if you need one:
+
+```powershell
+./tools/New-ScopeLab.ps1 -ResourceGroupName rg-wbscope-lab
+```
+
+### The check that verification does not cover
+
+The live suite runs its queries as the signed-in identity. If that identity is
+an Owner, a pass says nothing about the people reporting empty tiles.
+
+Open a scoped workbook in the portal as someone holding Log Analytics Reader on
+the **destination only**. If it renders history, scope is genuinely working for
+low-privilege viewers. If it goes empty, the fault is viewer permissions on the
+source workspace — cause A above — and no amount of re-scoping will fix it.

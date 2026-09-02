@@ -20,6 +20,7 @@ BeforeAll {
         Runbook     = Join-Path $script:RepoRoot 'docs\runbook.md'
         Guide       = Join-Path $script:RepoRoot 'docs\customer-guide.md'
         Troubleshoot = Join-Path $script:RepoRoot 'docs\troubleshooting.md'
+        Recovery    = Join-Path $script:RepoRoot 'docs\recovery.md'
     }
 
     # Ground truth: whatever the config layer actually defaults to.
@@ -88,5 +89,87 @@ Describe 'Verification claims' {
     It 'keeps the README admission that self-healing is unverified live' {
         $readme = Get-Content $script:Docs.README -Raw
         $readme | Should -Match '(?i)not been verified against live Azure'
+    }
+}
+
+Describe 'Documented commands' {
+    <#
+        A command in the documentation that does not run is the same class of
+        defect as a test that cannot fail: it looks like guidance and is not.
+        Both of these have already happened here - a runbook naming the wrong
+        default scope mode, and a push command naming a branch that did not
+        exist.
+
+        These tests check that every script the docs tell someone to run exists,
+        and that every switch they pass it is real.
+    #>
+
+    BeforeAll {
+        $script:DocFiles = @($script:Docs.Values | Where-Object { Test-Path $_ })
+
+        function Get-ScriptParameterName {
+            param([string]$Path)
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Resolve-Path $Path), [ref]$null, [ref]$errors)
+            if (-not $ast.ParamBlock) { return @() }
+            return @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        }
+    }
+
+    It 'references only scripts that exist' {
+        $missing = foreach ($f in $script:DocFiles) {
+            $lineNo = 0
+            foreach ($line in (Get-Content $f)) {
+                $lineNo++
+                foreach ($m in [regex]::Matches($line, '\./(tools|tests)/[A-Za-z0-9\.\-]+\.ps1')) {
+                    $rel = $m.Value -replace '^\./', '' -replace '/', [System.IO.Path]::DirectorySeparatorChar
+                    if (-not (Test-Path (Join-Path $script:RepoRoot $rel))) {
+                        "$(Split-Path $f -Leaf):$lineNo -> $($m.Value)"
+                    }
+                }
+            }
+        }
+
+        $missing | Should -BeNullOrEmpty -Because 'a documented command that points at a missing script cannot be followed'
+    }
+
+    It 'passes only switches the target script actually declares' {
+        # Scoped to the scripts the docs drive most, and skips parameters that
+        # belong to a different command on the same line - Get-Help ... -Full is
+        # the common one.
+        $targets = @{
+            'Sentinel-Workbook-Scope-Assistant.ps1' = (Get-ScriptParameterName (Join-Path $script:RepoRoot 'Sentinel-Workbook-Scope-Assistant.ps1'))
+            'Test-WorkbookScope.ps1'                = (Get-ScriptParameterName (Join-Path $script:RepoRoot 'tools\Test-WorkbookScope.ps1'))
+            'New-ScopeLab.ps1'                      = (Get-ScriptParameterName (Join-Path $script:RepoRoot 'tools\New-ScopeLab.ps1'))
+            'Save-ArmFixture.ps1'                   = (Get-ScriptParameterName (Join-Path $script:RepoRoot 'tools\Save-ArmFixture.ps1'))
+        }
+        $common = @(
+            'Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'WhatIf', 'Confirm'
+            'ErrorVariable', 'WarningVariable', 'OutVariable', 'OutBuffer'
+            'PipelineVariable', 'InformationAction', 'InformationVariable', 'ProgressAction'
+        )
+
+        $bad = foreach ($f in $script:DocFiles) {
+            $lineNo = 0
+            foreach ($line in (Get-Content $f)) {
+                $lineNo++
+                # Another cmdlet on the line owns its own switches.
+                if ($line -match '(?i)\bGet-Help\b') { continue }
+
+                foreach ($name in $targets.Keys) {
+                    if ($line -notmatch [regex]::Escape($name)) { continue }
+                    foreach ($m in [regex]::Matches($line, '\s-([A-Za-z][A-Za-z0-9]*)')) {
+                        $p = $m.Groups[1].Value
+                        if ($p -in $common) { continue }
+                        if ($p -notin $targets[$name]) {
+                            "$(Split-Path $f -Leaf):$lineNo -$p is not a parameter of $name"
+                        }
+                    }
+                }
+            }
+        }
+
+        $bad | Should -BeNullOrEmpty -Because 'a documented switch the script does not declare fails at the prompt'
     }
 }

@@ -211,6 +211,16 @@ results from **both** workspaces. It skips unless the lab variables are set. Run
 it before describing this tool as verified. See [Recovery](docs/recovery.md) if an
 environment is already affected.
 
+```powershell
+./tools/New-ScopeLab.ps1 -ResourceGroupName rg-wbscope-lab   # build a lab
+./tools/Show-VerificationStatus.ps1                          # VERIFIED / NOT VERIFIED
+```
+
+`Show-VerificationStatus.ps1` keys its verdict off the single assertion that
+proves the tool works, and will not report success from a skipped run — a
+distinction that is one character of Pester output and the whole difference
+between verified and not.
+
 **The self-healing behaviour has not been verified against live Azure.** Each
 mechanism it relies on is individually documented by Microsoft — `isGlobal`,
 `isHiddenWhenLocked`, an unset `isRequired`, and an empty parameter collapsing out of
