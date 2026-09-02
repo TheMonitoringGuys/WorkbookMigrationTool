@@ -516,12 +516,29 @@ try {
             foreach ($ro in @('timeModified', 'userId', 'revision')) {
                 if ($props.PSObject.Properties[$ro]) { $props.PSObject.Properties.Remove($ro) }
             }
+            # A null here is not the same as an absent key. storageUri null on a
+            # workbook that keeps its definition in customer-owned storage asks
+            # ARM to unlink that storage, which loses the definition. The GET
+            # returns these keys as null for the ordinary case, so they have to
+            # be dropped rather than echoed.
+            foreach ($p in @($props.PSObject.Properties)) {
+                if ($null -eq $p.Value) { $props.PSObject.Properties.Remove($p.Name) }
+            }
 
             $body = @{
                 location   = $wb.location
                 tags       = $tags
                 kind       = if ($wb.kind) { $wb.kind } else { 'shared' }
                 properties = $props
+            }
+
+            # A PUT replaces the resource. Omitting an assigned managed identity
+            # removes it, which breaks a storage-backed workbook permanently -
+            # and the scope update would still report success. Every workbook in
+            # the sample corpus is identity 'None', so this costs nothing there
+            # and prevents a silent, unrecoverable loss elsewhere.
+            if ($wb.PSObject.Properties['identity'] -and $wb.identity) {
+                $body['identity'] = $wb.identity
             }
 
             $uri = Get-WorkbookUri -ArmEndpoint $armEndpoint `

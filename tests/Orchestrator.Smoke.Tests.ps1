@@ -387,6 +387,49 @@ Describe 'PUT payload' {
         $dry = Invoke-Orchestrator -Parameters @{ DryRun = $true; SkipPreflight = $true }
         @($dry.Bodies).Count | Should -Be 0
     }
+
+    It 'never sends a null-valued property' {
+        # A null is not an absent key. storageUri null on a workbook backed by
+        # customer-owned storage asks ARM to unlink that storage. The GET returns
+        # these as null for the ordinary case, so they must be dropped.
+        foreach ($b in (Get-CapturedBody)) {
+            foreach ($p in $b.properties.PSObject.Properties) {
+                $p.Value | Should -Not -BeNullOrEmpty -Because "properties.$($p.Name) was sent as null on '$($b.properties.displayName)'"
+            }
+        }
+    }
+
+    It 'preserves an assigned managed identity instead of removing it' {
+        # A PUT replaces the resource. Dropping an assigned identity breaks a
+        # storage-backed workbook permanently while the run still reports
+        # success. Every workbook in the sample corpus is identity 'None', so
+        # this needs its own fixture to mean anything.
+        $work = Join-Path ([System.IO.Path]::GetTempPath()) "wbscope-ident-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $fixture = Join-Path $work 'workbooks.json'
+
+        $wbs = Get-Content $script:Fixture -Raw | ConvertFrom-Json
+        $one = $wbs | Select-Object -First 1
+        $one.identity = [PSCustomObject]@{
+            type                   = 'UserAssigned'
+            userAssignedIdentities = [PSCustomObject]@{
+                '/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-dest/providers/Microsoft.ManagedIdentity/userAssignedIdentities/wb-mi' = [PSCustomObject]@{}
+            }
+        }
+        ,@($one) | ConvertTo-Json -Depth 100 | Set-Content $fixture -Encoding UTF8
+
+        $saved = $script:Fixture
+        try {
+            $script:Fixture = $fixture
+            $run = Invoke-Orchestrator -Parameters @{ Execute = $true; Force = $true; SkipPreflight = $true }
+            $body = @($run.Bodies)[0]
+
+            $body | Should -Not -BeNullOrEmpty -Because "the identity fixture should still produce a write; stdout was:`n$($run.Stdout)"
+            $body.identity | Should -Not -BeNullOrEmpty -Because 'dropping the identity silently breaks a storage-backed workbook'
+            $body.identity.type | Should -Be 'UserAssigned'
+        }
+        finally { $script:Fixture = $saved }
+    }
 }
 
 Describe 'Failure handling' {
