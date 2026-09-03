@@ -355,6 +355,85 @@ Describe 'Cross-subscription handling' {
 
         (ConvertTo-SerializedWorkbook -Root $root) | Should -Match '\{Subscription\}'
     }
+
+    Context 'Pickers that carry no subscription token' {
+        <#
+            A resource picker's crossComponentResources is the set of scopes it
+            ENUMERATES, which is not the same as the value it holds. If the
+            source subscription is not in that set, the picker cannot resolve
+            the source workspace: it drops out of the effective selection, the
+            query runs against the destination alone, and nothing reports a
+            failure. In the portal the same limitation appears as having to tick
+            "Load all subscriptions" before the source workspace can be found at
+            all.
+
+            The widening used to require a parameter token such as
+            {Subscription} in the existing value. That covers 4 of the 7 pickers
+            in the sample corpus. The other 3 - one with literal scopes, one
+            with none at all - were silently left unable to see the source
+            subscription, which is a live customer failure in a
+            cross-subscription migration.
+        #>
+
+        BeforeEach {
+            $script:MakeWorkbook = {
+                param([string]$CcrJson)
+                $ccr = if ($CcrJson) { ",""crossComponentResources"":$CcrJson" } else { '' }
+                $json = '{"version":"Notebook/1.0","items":[{"type":9,"content":{"parameters":[{"id":"p1","version":"KqlParameterItem/1.0","name":"Workspace","type":5,"query":"resources","queryType":1,"resourceType":"microsoft.resourcegraph/resources"' + $ccr + '}]},"name":"params"},{"type":3,"content":{"query":"Heartbeat","queryType":0,"resourceType":"microsoft.operationalinsights/workspaces","crossComponentResources":["{Workspace}"]},"name":"q1"}]}'
+                return (ConvertFrom-SerializedWorkbook -Json $json)
+            }
+        }
+
+        It 'adds the source subscription to a picker that has no scope at all' {
+            $root = & $script:MakeWorkbook $null
+
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+            $ccr = @($root['items'][0]['content']['parameters'][0]['crossComponentResources'])
+            $ccr | Should -Contain "/subscriptions/$($script:SourceSub)" -Because 'the picker cannot resolve a workspace in a subscription it does not enumerate'
+        }
+
+        It 'adds the source subscription to a picker scoped to literal subscriptions' {
+            $root = & $script:MakeWorkbook "[""/subscriptions/$($script:DestSub)""]"
+
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+            $ccr = @($root['items'][0]['content']['parameters'][0]['crossComponentResources'])
+            $ccr | Should -Contain "/subscriptions/$($script:SourceSub)"
+        }
+
+        It 'keeps a scope the author already set rather than replacing it' {
+            # Anything listed is a deliberate choice; the two subscriptions are
+            # added beside it, not instead of it.
+            $extra = '/subscriptions/cccccccc-cccc-cccc-cccc-cccccccccccc'
+            $root = & $script:MakeWorkbook "[""$extra""]"
+
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $script:SourceId -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:SourceSub -DestinationSubscriptionId $script:DestSub
+
+            $ccr = @($root['items'][0]['content']['parameters'][0]['crossComponentResources'])
+            $ccr | Should -Contain $extra
+            $ccr | Should -Contain "/subscriptions/$($script:SourceSub)"
+        }
+
+        It 'still adds nothing when both workspaces share a subscription' {
+            $sameSubSource = $script:SourceId -replace [regex]::Escape($script:SourceSub), $script:DestSub
+            $root = & $script:MakeWorkbook $null
+
+            $null = Set-WorkbookDualScope -Root $root `
+                -SourceWorkspaceId $sameSubSource -DestinationWorkspaceId $script:DestId `
+                -ScopeMode Literal -SourceSubscriptionId $script:DestSub -DestinationSubscriptionId $script:DestSub
+
+            $p = $root['items'][0]['content']['parameters'][0]
+            $has = $p.Contains('crossComponentResources') -and @($p['crossComponentResources']).Count -gt 0
+            $has | Should -BeFalse -Because 'a single-subscription migration needs no widening'
+        }
+    }
 }
 
 Describe 'Table extraction for validation' {

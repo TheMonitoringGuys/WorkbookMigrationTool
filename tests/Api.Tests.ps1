@@ -88,6 +88,61 @@ Describe 'API defaults' {
     }
 }
 
+Describe 'Log Analytics endpoint' {
+    <#
+        Get-LogAnalyticsQueryUri appends '/v1' itself, so the endpoint it is given
+        must not already carry one. Az.Accounts 5.x reports
+        'https://api.loganalytics.io/v1' for AzureOperationalInsightsEndpoint,
+        which produced '/v1/v1/workspaces/...' and a 404 on every data-plane
+        query - breaking -ValidateQueries and the query checks in
+        Test-WorkbookScope.ps1 on any current Az install.
+
+        The existing URI test passed throughout, because it supplied a
+        hand-written endpoint that happened to omit the segment. It asserted the
+        tool's assumption rather than what Az actually returns, which is the same
+        defect class the ARM contract tests exist to close.
+    #>
+
+    It 'strips a version segment that Az.Accounts 5.x includes' {
+        Mock Get-AzContext -ModuleName WorkbookScope.Api { [PSCustomObject]@{ Environment = [PSCustomObject]@{ Name = 'AzureCloud' } } }
+        Mock Get-AzEnvironment -ModuleName WorkbookScope.Api {
+            [PSCustomObject]@{ AzureOperationalInsightsEndpoint = 'https://api.loganalytics.io/v1' }
+        }
+
+        Resolve-LogAnalyticsEndpoint | Should -Be 'https://api.loganalytics.io'
+    }
+
+    It 'leaves an endpoint that has no version segment alone' {
+        Mock Get-AzContext -ModuleName WorkbookScope.Api { [PSCustomObject]@{ Environment = [PSCustomObject]@{ Name = 'AzureCloud' } } }
+        Mock Get-AzEnvironment -ModuleName WorkbookScope.Api {
+            [PSCustomObject]@{ AzureOperationalInsightsEndpoint = 'https://api.loganalytics.io' }
+        }
+
+        Resolve-LogAnalyticsEndpoint | Should -Be 'https://api.loganalytics.io'
+    }
+
+    It 'builds a query URI with exactly one version segment' {
+        Mock Get-AzContext -ModuleName WorkbookScope.Api { [PSCustomObject]@{ Environment = [PSCustomObject]@{ Name = 'AzureCloud' } } }
+        Mock Get-AzEnvironment -ModuleName WorkbookScope.Api {
+            [PSCustomObject]@{ AzureOperationalInsightsEndpoint = 'https://api.loganalytics.io/v1' }
+        }
+
+        # The assertion that would have caught this: compose the two functions
+        # the way the tool does, rather than testing the second one in isolation.
+        $uri = Get-LogAnalyticsQueryUri -LogAnalyticsEndpoint (Resolve-LogAnalyticsEndpoint) -WorkspaceId 'guid'
+
+        $uri | Should -Be 'https://api.loganalytics.io/v1/workspaces/guid/query?api-version=2017-10-01'
+        ([regex]::Matches($uri, '/v1/')).Count | Should -Be 1
+    }
+
+    It 'falls back to the commercial default when Az reports no endpoint' {
+        Mock Get-AzContext -ModuleName WorkbookScope.Api { [PSCustomObject]@{ Environment = [PSCustomObject]@{ Name = 'AzureCloud' } } }
+        Mock Get-AzEnvironment -ModuleName WorkbookScope.Api { [PSCustomObject]@{ } }
+
+        Resolve-LogAnalyticsEndpoint | Should -Be 'https://api.loganalytics.io'
+    }
+}
+
 Describe 'Access token validation' {
     <#
         A malformed Authorization header does not surface as a clean 401. Azure

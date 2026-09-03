@@ -107,7 +107,7 @@ Describe 'Live Azure' -Tag 'Live' -Skip:(-not $script:LabConfigured) {
             # not scoping. Establishing that here keeps it from being
             # misdiagnosed as a tool defect later.
             $arm = Resolve-ArmEndpoint -Cloud 'Commercial'
-            $la = Resolve-LogAnalyticsEndpoint -Cloud 'Commercial'
+            $la = Resolve-LogAnalyticsEndpoint
 
             $dstUri = Get-WorkspaceUriWithVersion -WorkspaceUri (
                 Get-ScopeWorkspaceUri -ArmEndpoint $arm -SubscriptionId $script:Lab.DstSub `
@@ -173,7 +173,7 @@ Describe 'Live Azure' -Tag 'Live' -Skip:(-not $script:LabConfigured) {
                 and counting distinct workspaces is what tells them apart.
             #>
             $arm = Resolve-ArmEndpoint -Cloud 'Commercial'
-            $la = Resolve-LogAnalyticsEndpoint -Cloud 'Commercial'
+            $la = Resolve-LogAnalyticsEndpoint
 
             $dstUri = Get-WorkspaceUriWithVersion -WorkspaceUri (
                 Get-ScopeWorkspaceUri -ArmEndpoint $arm -SubscriptionId $script:Lab.DstSub `

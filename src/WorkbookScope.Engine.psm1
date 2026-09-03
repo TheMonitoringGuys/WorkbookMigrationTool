@@ -1100,13 +1100,40 @@ function Set-ParameterDualScope {
     $crossSubscription = $SourceSubscriptionId -and $DestinationSubscriptionId -and
         ($SourceSubscriptionId -ine $DestinationSubscriptionId)
 
-    if ($crossSubscription -and $p.Contains('crossComponentResources')) {
-        $current = @(ConvertTo-SafeArray $p['crossComponentResources'] | ForEach-Object { [string]$_ })
+    # A resource picker's crossComponentResources is the set of scopes it
+    # ENUMERATES, which is a different thing from the value it holds. When the
+    # workspaces live in different subscriptions and the source subscription is
+    # not in that set, the picker cannot resolve the source workspace: it is
+    # dropped from the effective selection, the query runs against the
+    # destination alone, and nothing anywhere reports a failure. In the portal
+    # the same limitation shows up as having to tick "Load all subscriptions"
+    # before the source workspace can even be found in the list.
+    #
+    # This used to run only when the existing value held a parameter token such
+    # as {Subscription}. In the sample corpus that covers 4 of 7 pickers; the
+    # other 3 either carry literal values or have no crossComponentResources at
+    # all, and were left unable to see the source subscription.
+    if ($crossSubscription) {
+        $wanted = @("/subscriptions/$DestinationSubscriptionId", "/subscriptions/$SourceSubscriptionId")
+        $current = @()
+        if ($p.Contains('crossComponentResources')) {
+            $current = @(ConvertTo-SafeArray $p['crossComponentResources'] | ForEach-Object { [string]$_ })
+        }
+
         if ($current | Where-Object { $_ -match '^\{.+\}$' }) {
-            $p['crossComponentResources'] = @(
-                "/subscriptions/$DestinationSubscriptionId"
-                "/subscriptions/$SourceSubscriptionId"
-            )
+            # A token resolves to whatever the customer's own picker selected -
+            # one subscription. Replacing it is the point: keeping it would let
+            # that selection continue to hide the source subscription.
+            $p['crossComponentResources'] = $wanted
+        }
+        else {
+            # Anything already listed is a scope the author chose, so it is kept
+            # and the two subscriptions are added beside it.
+            $merged = [System.Collections.Generic.List[string]]::new()
+            $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($v in $current) { if ($seen.Add($v)) { $merged.Add($v) } }
+            foreach ($v in $wanted) { if ($seen.Add($v)) { $merged.Add($v) } }
+            $p['crossComponentResources'] = $merged.ToArray()
         }
     }
 

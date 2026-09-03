@@ -88,6 +88,15 @@ function Resolve-LogAnalyticsEndpoint {
         Only used by -ValidateQueries. Az exposes this as AzureOperationalInsightsEndpoint
         on newer module versions; older ones do not carry it at all, so the
         commercial default is the documented fallback rather than a guess.
+
+        The returned value never carries the API version segment. Az.Accounts 5.x
+        reports 'https://api.loganalytics.io/v1', older versions report no value
+        at all, and Get-LogAnalyticsQueryUri appends '/v1' itself - so passing the
+        Az value through produced '/v1/v1/workspaces/...' and a 404 on every
+        data-plane query. That broke -ValidateQueries and the query checks in
+        Test-WorkbookScope.ps1 on any current Az install, while the unit test
+        stayed green because it passed a hand-written endpoint that happened to
+        omit the segment.
     #>
     [CmdletBinding()]
     param()
@@ -97,7 +106,9 @@ function Resolve-LogAnalyticsEndpoint {
 
     $env = Get-AzEnvironment -Name $ctx.Environment.Name -ErrorAction Stop
     $prop = $env.PSObject.Properties['AzureOperationalInsightsEndpoint']
-    if ($prop -and $prop.Value) { return ([string]$prop.Value).TrimEnd('/') }
+    if ($prop -and $prop.Value) {
+        return ([string]$prop.Value).TrimEnd('/') -replace '/v\d+$', ''
+    }
 
     return 'https://api.loganalytics.io'
 }
